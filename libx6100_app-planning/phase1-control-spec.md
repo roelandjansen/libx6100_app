@@ -154,7 +154,7 @@ CONNECTED
  └─ disconnect() ───────► CLOSING
 ```
 
-wfview has no timeouts on these states. Only are-you-there gives up visibly (status message after 20 attempts) and keeps trying.
+wfview has no timeouts on these states. Are-you-there repeats until the user disconnects. wfview has a "Radio not responding!" message after 20 attempts, but its timer bypasses the function that sets it, so it never shows; this client shows it (deviation 4).
 
 ### 5.1 Login (0x80)
 
@@ -420,6 +420,7 @@ const char *session_status_text(const struct session *s);
 | 1 | address family | IPv4, falls back to IPv6 | IPv4 only (your decision) |
 | 2 | link loss | no detection on the client; only CI-V 2 s and audio 30 s watchdogs | LOST when nothing has been received on any stream for `STALE_CONNECTION` (15 s), wfview's own server value. On LOST: PTT off locally, all streams torn down, reason shown. Required by the TX guards (phase 5) |
 | 3 | unknown model | falls back to `DEFAULT-ICOM.rig` | hard error `FAILED(unknown_model)`, disconnect |
+| 4 | "Radio not responding!" | message exists after 20 are-you-there attempts but is never shown (timer calls `sendControl` directly) | shown once after 20 attempts, are-you-there continues (UI only, nothing on the wire changes) |
 
 Findings that affect other phases:
 
@@ -435,8 +436,8 @@ Against `wfview --6100` on control port 50091:
 
 1. Connect, login, capabilities, stream request, status: CI-V and audio streams open, CI-V data arrives.
 2. Wrong password: FAILED(auth) with "Invalid Username/Password".
-3. Wrong control port: are-you-there repeats; after 20 attempts the status shows "Radio not responding" and it keeps trying until the user disconnects.
-4. Radio busy by another client: status shows "in use by", no stream request.
+3. Wrong control port: are-you-there repeats; after 20 attempts (10 s) the status shows "Radio not responding!" once, and it keeps trying until the user disconnects.
+4. Second client: wfserver accepts several clients at once, so both connect (confirmed on the X6100). "in use by" only appears when the server reports the radio busy, e.g. a radio's own LAN server with another client on it; that path is covered by the host test `test_busy`.
 5. Session held 30 minutes with token renewals every 60 s.
 5a. Network dropped mid-session: LOST after 15 s, PTT off, all streams torn down.
 5b. `X6100.rig` removed: `FAILED(unknown_model 0x61)`, session disconnected.
