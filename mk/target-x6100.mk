@@ -19,6 +19,7 @@ C_SYSROOT_LIBS   :=
 endif
 
 CFLAGS_TARGET := -mcpu=cortex-a7 $(C_SYSROOT_CFLAGS)
+CFLAGS_TARGET_TP := -mcpu=cortex-a7
 LDFLAGS_TARGET := $(C_SYSROOT_LIBS)
 LDLIBS_TARGET := -lm -lpthread
 

@@ -14,9 +14,11 @@ endif
 
 CFLAGS_COMMON := $(C_STD_FLAGS) $(C_WARN_FLAGS) $(C_OPT_FLAGS) -MMD -MP -I.
 
-SRC_COMMON := $(wildcard core/*.c) $(wildcard model/*.c) $(wildcard ui/*.c)
-
 OBJDIR := $(BUILD)/obj
+
+include mk/third_party.mk
+
+SRC_COMMON := $(wildcard core/*.c) $(wildcard model/*.c) $(wildcard ui/*.c) $(SRC_THIRD_PARTY)
 
 # Objects for a list of sources: build/<target>/obj/<path>.o
 objs = $(patsubst %.c,$(OBJDIR)/%.o,$(1))

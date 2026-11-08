@@ -38,6 +38,11 @@ struct profile {
 	uint8_t tx_codec;
 	uint32_t tx_sample;
 	uint16_t tx_latency;
+
+	//
+	// Playback device rate (0 = no RX audio pipeline)
+	//
+	uint32_t dev_rate;
 };
 
 enum session_state {
@@ -88,6 +93,13 @@ struct session_info {
 	uint32_t civ_frames;
 	uint32_t audio_packets;
 	uint32_t audio_dropped_late;
+	int audio_lateness_ms;
+	int audio_latency_ms;
+	uint32_t audio_underruns;
+	uint32_t audio_overrun_frames;
+	uint32_t audio_decode_errors;
+	float audio_peak;
+	uint8_t rx_codec;
 	uint32_t retransmitted;
 	uint32_t requests_sent;
 };
@@ -129,3 +141,10 @@ const char *control_state_name(enum control_state st);
 //
 
 int session_civ_send(struct session *s, const uint8_t *civ, size_t len);
+
+//
+// RX audio (device callback / any thread)
+//
+
+void session_audio_read(struct session *s, float *out, size_t frames);
+void session_set_volume(struct session *s, uint8_t volume);

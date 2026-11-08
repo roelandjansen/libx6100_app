@@ -23,6 +23,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "core/audio_rx.h"
 #include "core/audio_stream.h"
 #include "core/civ_stream.h"
 #include "core/udp_socket.h"
@@ -61,6 +62,7 @@ struct session {
 	struct control ctl;
 	struct civ_stream civ;
 	struct audio_stream audio;
+	struct audio_rx *arx;
 	bool streams_open;
 
 	//
@@ -157,6 +159,18 @@ static void update_info(struct session *s)
 		i->civ_frames = s->civ.frames_rx;
 		i->audio_packets = s->audio.packets_rx;
 		i->audio_dropped_late = s->audio.dropped_late;
+		i->audio_lateness_ms = s->audio.s.ping_lateness_ms;
+		if (s->arx != NULL) {
+			struct audio_rx_stats st;
+
+			audio_rx_get_stats(s->arx, &st);
+			i->audio_latency_ms = st.latency_ms;
+			i->audio_underruns = st.underruns;
+			i->audio_overrun_frames = st.overrun_frames;
+			i->audio_decode_errors = st.decode_errors;
+			i->audio_peak = st.peak;
+		}
+		i->rx_codec = s->ctl.cfg.rx_codec;
 	}
 	i->retransmitted = s->ctl.s.stats.retransmitted;
 	i->requests_sent = s->ctl.s.stats.requests_sent;
@@ -204,13 +218,45 @@ static void on_civ_data(void *ctx, const uint8_t *civ, size_t len)
 		s->hooks.civ_data(s->hooks.ctx, civ, len);
 }
 
+//
+// Audio stream events (network thread): feed the RX pipeline, then the hooks
+//
+
+static void on_audio_start(void *ctx)
+{
+	struct session *s = ctx;
+
+	if (s->hooks.audio_start != NULL)
+		s->hooks.audio_start(s->hooks.ctx);
+}
+
+static void on_audio_stop(void *ctx)
+{
+	struct session *s = ctx;
+
+	if (s->hooks.audio_stop != NULL)
+		s->hooks.audio_stop(s->hooks.ctx);
+}
+
+static void on_audio_data(void *ctx, uint32_t seq, const uint8_t *payload, size_t len)
+{
+	struct session *s = ctx;
+	const int64_t now = clock_mono_ms();
+
+	if (s->arx != NULL)
+		audio_rx_push(s->arx, payload, len, now, now);
+
+	if (s->hooks.audio_data != NULL)
+		s->hooks.audio_data(s->hooks.ctx, seq, payload, len);
+}
+
 static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 {
 	struct session *s = ctx;
 	const int64_t now = clock_mono_ms();
 	struct udp_io io_civ = { udp_socket_send, clock_day_ms, &s->u_civ };
 	struct udp_io io_audio = { udp_socket_send, clock_day_ms, &s->u_audio };
-	struct audio_rx_events aev = { s->hooks.audio_start, s->hooks.audio_stop, s->hooks.audio_data, s->hooks.ctx };
+	struct audio_rx_events aev = { on_audio_start, on_audio_stop, on_audio_data, s };
 
 	if (udp_socket_connect(&s->u_civ, s->peer_ip, civ_port) != 0 ||
 			udp_socket_connect(&s->u_audio, s->peer_ip, audio_port) != 0) {
@@ -224,6 +270,12 @@ static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 	audio_stream_init(&s->audio, &io_audio,
 			udp_stream_endpoint_id(s->u_audio.local_ip, s->u_audio.local_port),
 			&aev, s->prof.rx_latency, now);
+	// Codec as finally negotiated (Opus may have been forced to LPCM16 at login)
+	if (s->arx != NULL &&
+			audio_rx_configure(s->arx, s->ctl.cfg.rx_codec, s->prof.rx_sample, s->prof.rx_latency) != 0) {
+		snprintf(s->ctl.status, sizeof(s->ctl.status), "Unsupported RX codec 0x%02x", s->ctl.cfg.rx_codec);
+	}
+
 	s->streams_open = true;
 	set_state(s, SESSION_CONNECTED, SESSION_REASON_NONE);
 }
@@ -238,6 +290,8 @@ static void ev_close_streams(void *ctx)
 
 	audio_stream_close(&s->audio);
 	civ_stream_close(&s->civ, now);
+	if (s->arx != NULL)
+		audio_rx_stop(s->arx);
 	s->streams_open = false;
 	update_info(s);
 }
@@ -481,7 +535,17 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 	s->u_civ.fd = -1;
 	s->u_audio.fd = -1;
 
+	if (p->dev_rate != 0) {
+		s->arx = calloc(1, sizeof(*s->arx));
+		if (s->arx == NULL) {
+			free(s);
+			return -1;
+		}
+		audio_rx_init(s->arx, p->dev_rate);
+	}
+
 	if (pipe(s->wake) != 0) {
+		free(s->arx);
 		free(s);
 		return -1;
 	}
@@ -491,6 +555,7 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 		close(s->wake[0]);
 		close(s->wake[1]);
 		pthread_mutex_destroy(&s->lock);
+		free(s->arx);
 		free(s);
 		return -1;
 	}
@@ -515,6 +580,10 @@ void session_disconnect(struct session *s)
 	close(s->wake[0]);
 	close(s->wake[1]);
 	pthread_mutex_destroy(&s->lock);
+	if (s->arx != NULL) {
+		audio_rx_stop(s->arx);
+		free(s->arx);
+	}
 	free(s);
 }
 
@@ -545,4 +614,25 @@ int session_civ_send(struct session *s, const uint8_t *civ, size_t len)
 	}
 
 	return rc;
+}
+
+//
+// Device callback: fill frames stereo floats (silence without a pipeline).
+// The platform must stop its device before session_disconnect().
+//
+
+void session_audio_read(struct session *s, float *out, size_t frames)
+{
+	if (s == NULL || s->arx == NULL) {
+		memset(out, 0, frames * 2 * sizeof(float));
+		return;
+	}
+
+	audio_rx_read(s->arx, out, frames);
+}
+
+void session_set_volume(struct session *s, uint8_t volume)
+{
+	if (s->arx != NULL)
+		audio_rx_set_volume(s->arx, volume);
 }

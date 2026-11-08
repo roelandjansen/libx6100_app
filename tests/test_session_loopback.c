@@ -187,6 +187,7 @@ static void srv_send_data(struct fake_server *f)
 
 	if (f->have_peer[2]) {
 		srv_hdr(p, 0x18 + 0x20, 0);
+		memset(p + 0x18, 0x40, 0x20);
 		srv_send(f, 2, p, 0x18 + 0x20, 1);
 	}
 }
@@ -215,6 +216,7 @@ int main(void)
 	p.rx_codec = 0x04;
 	p.rx_sample = 48000;
 	p.rx_latency = 150;
+	p.dev_rate = 48000;
 
 	CHECK(session_connect(&s, &p, NULL) == 0);
 
@@ -238,6 +240,23 @@ int main(void)
 	CHECK(strcmp(info.connection, "WFVIEW") == 0);
 	CHECK(info.civ_frames > 5);
 	CHECK(info.audio_packets > 5);
+
+	// RX pipeline: PCM16 0x4040 reaches the ring on both channels after the silence pre-fill
+	{
+		static float buf[48000 * 2];
+		size_t k;
+		int found = 0;
+
+		session_audio_read(s, buf, 48000);
+		for (k = 0; k < 48000; k++) {
+			if (buf[k * 2] != 0.0f) {
+				found = (buf[k * 2] > 0.5f && buf[k * 2] == buf[k * 2 + 1]);
+				break;
+			}
+		}
+		CHECK(found);
+		CHECK(info.rx_codec == 0x04);
+	}
 
 	session_disconnect(s);
 

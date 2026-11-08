@@ -5,7 +5,7 @@
 
 CC ?= cc
 
-C_SDL_CFLAGS := $(shell pkg-config --cflags sdl2 2>/dev/null)
+C_SDL_CFLAGS := $(patsubst -I%,-isystem %,$(shell pkg-config --cflags sdl2 2>/dev/null))
 C_SDL_LIBS   := $(shell pkg-config --libs sdl2 2>/dev/null)
 
 ifeq ($(C_SDL_LIBS),)
@@ -19,6 +19,7 @@ C_SAN_FLAGS :=
 endif
 
 CFLAGS_TARGET := $(C_SDL_CFLAGS) $(C_SAN_FLAGS)
+CFLAGS_TARGET_TP :=
 LDFLAGS_TARGET := $(C_SAN_FLAGS)
 LDLIBS_TARGET := $(C_SDL_LIBS) -lm -lpthread
 

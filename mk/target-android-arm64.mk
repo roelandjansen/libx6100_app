@@ -17,6 +17,7 @@ $(error NDK compiler not found: $(CC))
 endif
 
 CFLAGS_TARGET := -fPIC
+CFLAGS_TARGET_TP := -fPIC
 LDFLAGS_TARGET := -shared -Wl,-z,max-page-size=16384 -Wl,--no-undefined
 LDLIBS_TARGET := -laaudio -landroid -llog -lm
 
