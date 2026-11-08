@@ -1,0 +1,4 @@
+/build/
+/config.mk
+*.jks
+*.keystore
