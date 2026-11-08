@@ -484,6 +484,13 @@ void control_tick(struct control *c, int64_t now_ms)
 	}
 
 	udp_stream_tick(&c->s, now_ms);
+
+	// Deviation 4 (UI only): wfview has this message in sendAreYouThere(), but its
+	// timer calls sendControl() directly, so it never shows. Here it does.
+	if (c->state == CTL_STATE_AYT && !c->ayt_warned && c->s.ayt_count >= CONTROL_AYT_WARN) {
+		set_status(c, "Radio not responding!");
+		c->ayt_warned = true;
+	}
 }
 
 int64_t control_next_deadline(const struct control *c)

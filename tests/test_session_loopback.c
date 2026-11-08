@@ -40,6 +40,7 @@ struct fake_server {
 	int got_disconnect;
 	int got_login;
 	int got_request;
+	int reject_login;
 };
 
 static int srv_socket(uint16_t *port)
@@ -96,6 +97,8 @@ static void srv_handle_control(struct fake_server *f, const uint8_t *b, size_t l
 		memcpy(p + 0x1a, b + 0x1a, 2);
 		proto_put_le32(p + 0x1c, 0x12345678u);
 		memcpy(p + 0x40, "WFVIEW", 6);
+		if (f->reject_login)
+			proto_put_le32(p + 0x30, 0xfeffffffu);
 		srv_send(f, 0, p, PROTO_LOGIN_RESPONSE_SIZE, 1);
 	} else if (len == PROTO_TOKEN_SIZE && b[0x15] == 0x02) {
 		srv_hdr(p, sizeof(p), 0);
@@ -243,6 +246,24 @@ int main(void)
 	while (clock_mono_ms() < until)
 		srv_poll(&f, 20);
 	CHECK(f.got_disconnect >= 1);
+
+	// Second run: server rejects the login; reason and wfview's text must reach the snapshot
+	f.reject_login = 1;
+	f.got_login = 0;
+	CHECK(session_connect(&s, &p, NULL) == 0);
+	until = clock_mono_ms() + 3000;
+	while (clock_mono_ms() < until) {
+		srv_poll(&f, 20);
+		session_get_info(s, &info);
+		if (info.state == SESSION_FAILED)
+			break;
+	}
+	session_get_info(s, &info);
+	CHECK(f.got_login == 1);
+	CHECK(info.state == SESSION_FAILED);
+	CHECK(info.reason == SESSION_REASON_AUTH);
+	CHECK(strcmp(info.status, "Invalid Username/Password") == 0);
+	session_disconnect(s);
 
 	for (i = 0; i < 3; i++)
 		close(f.fd[i]);

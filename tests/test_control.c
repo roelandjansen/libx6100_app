@@ -325,8 +325,37 @@ static void test_busy(void)
 	CHECK(G_C.cfg.rx_codec == 0x40);
 }
 
+static void test_not_responding(void)
+{
+	struct control_cfg cfg;
+	int64_t t;
+
+	memset(&G_CAP, 0, sizeof(G_CAP));
+	memset(&G_EV, 0, sizeof(G_EV));
+	memset(&cfg, 0, sizeof(cfg));
+	control_init(&G_C, &cfg, &C_IO, &C_EV, 1, 0);
+
+	// 19 are-you-there: no message yet
+	for (t = 500; t <= 19 * 500; t += 500)
+		control_tick(&G_C, t);
+	CHECK(G_C.s.ayt_count == 19);
+	CHECK(!G_C.ayt_warned);
+	CHECK(G_EV.status[0] == '\0');
+
+	// 20th: message once, and it keeps trying
+	control_tick(&G_C, 20 * 500);
+	CHECK(strcmp(G_EV.status, "Radio not responding!") == 0);
+	G_EV.status[0] = '\0';
+	for (t = 21 * 500; t <= 30 * 500; t += 500)
+		control_tick(&G_C, t);
+	CHECK(G_EV.status[0] == '\0');
+	CHECK(G_C.state == CTL_STATE_AYT);
+	CHECK(proto_get_le16(G_CAP.buf[last()] + PROTO_OFF_TYPE) == PROTO_TYPE_AREYOUTHERE);
+}
+
 int main(void)
 {
+	test_not_responding();
 	test_login_packet();
 	test_bad_password();
 	test_full_connect();

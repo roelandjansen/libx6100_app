@@ -82,8 +82,9 @@ static int run_test(int argc, char *argv[])
 		session_get_info(s, &now);
 
 		if (now.state != last.state || strcmp(now.status, last.status) != 0) {
-			printf("state: %s  control: %d  status: %s\n",
-					session_state_name(now.state), (int)now.control_state, now.status);
+			printf("state: %s  control: %s  reason: %s  status: %s\n",
+					session_state_name(now.state), control_state_name(now.control_state),
+					session_reason_name(now.reason), now.status);
 			if (now.state == SESSION_CONNECTED)
 				printf("radio: %s  civ: 0x%02x  baud: %u  connection: %s  ports: civ %u audio %u\n",
 						now.radio_name, now.civ_addr, now.baudrate, now.connection,

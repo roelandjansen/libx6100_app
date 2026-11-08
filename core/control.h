@@ -18,6 +18,7 @@
 
 #define CONTROL_MAX_RADIOS	8
 #define CONTROL_STATUS_LEN	128
+#define CONTROL_AYT_WARN	20
 
 enum control_state {
 	CTL_STATE_AYT,
@@ -133,6 +134,7 @@ struct control {
 	int64_t t_token;
 	char connection[17];
 	bool high_bandwidth;
+	bool ayt_warned;
 
 	//
 	// Radios from the capabilities packet

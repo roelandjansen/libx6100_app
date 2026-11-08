@@ -98,6 +98,37 @@ const char *session_state_name(enum session_state st)
 	return "?";
 }
 
+const char *session_reason_name(enum session_reason r)
+{
+	switch (r) {
+	case SESSION_REASON_NONE:		return "none";
+	case SESSION_REASON_RESOLVE:		return "host not found";
+	case SESSION_REASON_SOCKET:		return "socket error";
+	case SESSION_REASON_AUTH:		return "invalid username/password";
+	case SESSION_REASON_CONN_FAILED:	return "connection failed";
+	case SESSION_REASON_IN_USE:		return "radio in use";
+	case SESSION_REASON_LINK_LOST:		return "link lost";
+	}
+
+	return "?";
+}
+
+const char *control_state_name(enum control_state st)
+{
+	switch (st) {
+	case CTL_STATE_AYT:		return "are-you-there";
+	case CTL_STATE_READY_WAIT:	return "ready-wait";
+	case CTL_STATE_LOGIN:		return "login";
+	case CTL_STATE_AUTHENTICATED:	return "authenticated";
+	case CTL_STATE_STREAM_REQ:	return "stream-request";
+	case CTL_STATE_STREAMS_OPEN:	return "streams-open";
+	case CTL_STATE_FAILED:		return "failed";
+	case CTL_STATE_CLOSED:		return "closed";
+	}
+
+	return "?";
+}
+
 //
 // Snapshot helpers (network thread)
 //
@@ -224,9 +255,8 @@ static void ev_error(void *ctx, enum control_reason reason, const char *msg)
 {
 	struct session *s = ctx;
 
-	pthread_mutex_lock(&s->lock);
-	snprintf(s->info.status, sizeof(s->info.status), "%s", msg);
-	pthread_mutex_unlock(&s->lock);
+	// Into the control status, which update_info() copies to the snapshot
+	snprintf(s->ctl.status, sizeof(s->ctl.status), "%s", msg);
 
 	switch (reason) {
 	case CTL_REASON_AUTH:

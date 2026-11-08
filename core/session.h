@@ -121,6 +121,8 @@ void session_disconnect(struct session *s);
 
 void session_get_info(struct session *s, struct session_info *out);
 const char *session_state_name(enum session_state st);
+const char *session_reason_name(enum session_reason r);
+const char *control_state_name(enum control_state st);
 
 //
 // CI-V out (any thread)
