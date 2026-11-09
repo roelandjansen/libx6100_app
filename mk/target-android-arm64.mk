@@ -25,6 +25,11 @@ SRC_PLATFORM := $(wildcard platform/android/jni/*.c)
 OBJS := $(call objs,$(SRC_COMMON) $(SRC_UI) $(SRC_PLATFORM))
 DEPS := $(OBJS:.o=.d)
 
+# The platform glue uses LVGL and the operating screen
+$(OBJDIR)/platform/android/jni/%.o: platform/android/jni/%.c
+	@mkdir -p -- $(dir $@)
+	$(CC) $(CFLAGS_COMMON) $(C_UI_FLAGS) $(CFLAGS_TARGET) -c -o $@ $<
+
 OUT := $(BUILD)/lib/arm64-v8a/libradio.so
 
 $(OUT): $(OBJS)
