@@ -73,7 +73,12 @@ struct ui_font_data {
 // Lifecycle
 //
 
-int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font_data *font);
+//
+// inset_top / inset_bottom: rows covered by the status and navigation bars
+//
+
+int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font_data *font,
+		int32_t inset_top, int32_t inset_bottom);
 void ui_destroy(void);
 
 //

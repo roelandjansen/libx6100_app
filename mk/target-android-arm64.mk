@@ -22,7 +22,7 @@ LDFLAGS_TARGET := -shared -Wl,-z,max-page-size=16384 -Wl,--no-undefined
 LDLIBS_TARGET := -laaudio -landroid -llog -lm
 
 SRC_PLATFORM := $(wildcard platform/android/jni/*.c)
-OBJS := $(call objs,$(SRC_COMMON) $(SRC_PLATFORM))
+OBJS := $(call objs,$(SRC_COMMON) $(SRC_UI) $(SRC_PLATFORM))
 DEPS := $(OBJS:.o=.d)
 
 OUT := $(BUILD)/lib/arm64-v8a/libradio.so
@@ -31,7 +31,7 @@ $(OUT): $(OBJS)
 	@mkdir -p -- $(dir $@)
 	$(CC) $(LDFLAGS_TARGET) -o $@ $^ $(LDLIBS_TARGET)
 
-export ANDROID_SDK ANDROID_PLATFORM ANDROID_BUILD_TOOLS RADIO_KEYSTORE
+export ANDROID_SDK ANDROID_PLATFORM ANDROID_BUILD_TOOLS RADIO_KEYSTORE RADIO_KEYSTORE_PASS
 
 apk: $(OUT)
 	tools/apk-build.sh $(BUILD)

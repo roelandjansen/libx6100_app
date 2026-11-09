@@ -210,7 +210,7 @@ static void fake_state(void)
 	rx->scope.span_hz.value = 12000;
 	G.st.meter[RADIO_METER_S].valid = true;
 	G.st.meter[RADIO_METER_S].cal = 10.0;
-	G.st.agc = (struct radio_value){ true, 3 };
+	G.st.agc = (struct radio_value){ true, 2 };
 	G.st.preamp = (struct radio_value){ true, 1 };
 	G.st.attenuator = (struct radio_value){ true, 0 };
 	G.st.transmit = (struct radio_value){ true, G.tx ? 1 : 0 };
@@ -320,7 +320,7 @@ int main(int argc, char **argv)
 	ops.ptt_heartbeat = op_i;
 	ops.atu_tune = op_i;
 
-	if (ui_create(d, &ops, &font) != 0) {
+	if (ui_create(d, &ops, &font, 0, 0) != 0) {
 		fprintf(stderr, "ui_create failed\n");
 		return EXIT_FAILURE;
 	}

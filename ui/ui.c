@@ -681,7 +681,8 @@ static void build_overlay(lv_obj_t *scr)
 	lv_obj_center(G.l_overlay);
 }
 
-int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font_data *font)
+int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font_data *font,
+		int32_t inset_top, int32_t inset_bottom)
 {
 	lv_obj_t *scr;
 	int32_t fixed;
@@ -708,6 +709,8 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 	lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 	lv_obj_set_flex_flow(scr, LV_FLEX_FLOW_COLUMN);
 	lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+	lv_obj_set_style_pad_top(scr, inset_top, 0);
+	lv_obj_set_style_pad_bottom(scr, inset_bottom, 0);
 
 	build_status(scr);
 	build_meter(scr);
@@ -715,7 +718,7 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 
 	// Spectrum about a third of the scope area, waterfall the rest, above the bottom bar
 	fixed = U(30) + U(150) + U(76) + U(32) + U(28) + U(72);
-	rest = G.h - fixed;
+	rest = G.h - inset_top - inset_bottom - fixed;
 	if (rest < U(200))
 		rest = U(200);
 	build_scope(scr, rest * 2 / 5, rest - rest * 2 / 5);

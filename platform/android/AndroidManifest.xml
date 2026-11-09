@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+	package="nl.pa3met.libx6100app"
+	android:versionCode="1"
+	android:versionName="0.6">
+
+	<uses-sdk android:minSdkVersion="29" android:targetSdkVersion="36" />
+
+	<uses-permission android:name="android.permission.INTERNET" />
+	<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+	<uses-permission android:name="android.permission.WAKE_LOCK" />
+	<uses-permission android:name="android.permission.RECORD_AUDIO" />
+	<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+	<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+	<uses-feature android:name="android.hardware.microphone" android:required="false" />
+
+	<application
+		android:label="@string/app_name"
+		android:hasCode="true"
+		android:extractNativeLibs="false"
+		android:allowBackup="false"
+		android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+
+		<activity
+			android:name=".ProfileActivity"
+			android:exported="true"
+			android:screenOrientation="portrait">
+			<intent-filter>
+				<action android:name="android.intent.action.MAIN" />
+				<category android:name="android.intent.category.LAUNCHER" />
+			</intent-filter>
+		</activity>
+
+		<activity
+			android:name=".RadioActivity"
+			android:exported="false"
+			android:launchMode="singleTop"
+			android:screenOrientation="portrait"
+			android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|keyboard|navigation|uiMode|density|smallestScreenSize|fontScale">
+			<meta-data android:name="android.app.lib_name" android:value="radio" />
+		</activity>
+
+		<service
+			android:name=".RadioService"
+			android:exported="false"
+			android:foregroundServiceType="mediaPlayback|microphone" />
+	</application>
+</manifest>
