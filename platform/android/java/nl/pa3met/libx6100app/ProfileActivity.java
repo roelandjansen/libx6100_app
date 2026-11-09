@@ -14,6 +14,8 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.graphics.Color;
+import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
@@ -26,6 +28,42 @@ import android.widget.TextView;
 import java.util.ArrayList;
 
 public class ProfileActivity extends Activity {
+
+	//
+	// Spinner lists with explicit colours: the current choice on an accent
+	// background, the rest white on dark (the theme greys out the checked
+	// row, which made it unreadable)
+	//
+	private final class ChoiceAdapter extends ArrayAdapter<String> {
+		private final Spinner owner;
+
+		ChoiceAdapter(Spinner owner, String[] names) {
+			super(ProfileActivity.this, android.R.layout.simple_spinner_item, names);
+			this.owner = owner;
+			setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+		}
+
+		@Override
+		public View getView(int pos, View convert, ViewGroup parent) {
+			TextView t = (TextView)super.getView(pos, convert, parent);
+
+			t.setTextColor(Color.WHITE);
+			return t;
+		}
+
+		@Override
+		public View getDropDownView(int pos, View convert, ViewGroup parent) {
+			TextView t = (TextView)super.getDropDownView(pos, convert, parent);
+			boolean cur = pos == owner.getSelectedItemPosition();
+
+			t.setEnabled(true);
+			t.setTextColor(Color.WHITE);
+			t.setBackgroundColor(cur ? 0xff2e6d8e : 0xff1d2733);
+			if (t instanceof android.widget.CheckedTextView)
+				((android.widget.CheckedTextView)t).setCheckMarkDrawable(null);
+			return t;
+		}
+	}
 
 	//
 	// Codec menu as wfview: label, RS-BA1 codec byte
@@ -71,10 +109,9 @@ public class ProfileActivity extends Activity {
 	private Spinner choice(String label, String[] names, int sel) {
 		TextView t = new TextView(this);
 		Spinner s = new Spinner(this);
-		ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, names);
+		ArrayAdapter<String> a = new ChoiceAdapter(s, names);
 
 		t.setText(label);
-		a.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
 		s.setAdapter(a);
 		s.setSelection(sel);
 		form.addView(t);
