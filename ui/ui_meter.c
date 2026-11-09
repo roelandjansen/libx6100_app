@@ -304,6 +304,19 @@ static void draw_needle(struct ui_meter *m)
 	m->shown_peak = m->peak;
 }
 
+//
+// Readings start at a fixed x (as the fixed-width "S%-4d" of s_reading):
+// the widest text ends 8 px from the right edge, the "S" never moves
+//
+
+static int32_t left_of(const struct ui_meter *m, const char *widest)
+{
+	lv_point_t sz;
+
+	lv_text_get_size(&sz, widest, m->f_big, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	return m->w - (int32_t)lround(8.0 * m->k) - sz.x;
+}
+
 struct ui_meter *ui_meter_create(lv_obj_t *parent, int32_t w, const void *ttf, size_t ttf_len)
 {
 	struct ui_meter *m = calloc(1, sizeof(*m));
@@ -335,12 +348,12 @@ struct ui_meter *ui_meter_create(lv_obj_t *parent, int32_t w, const void *ttf, s
 	lv_obj_set_style_text_font(m->l_line1, m->f_big, 0);
 	lv_obj_set_style_text_color(m->l_line1, lv_color_hex(C_WHITE), 0);
 	lv_label_set_text(m->l_line1, "");
-	lv_obj_align(m->l_line1, LV_ALIGN_BOTTOM_RIGHT, -(int32_t)lround(8.0 * m->k), -(int32_t)lround(22.0 * m->k));
+	lv_obj_align(m->l_line1, LV_ALIGN_BOTTOM_LEFT, left_of(m, "S9+60"), -(int32_t)lround(22.0 * m->k));
 	m->l_line2 = lv_label_create(m->canvas);
 	lv_obj_set_style_text_font(m->l_line2, m->f_big, 0);
 	lv_obj_set_style_text_color(m->l_line2, lv_color_hex(C_GREY), 0);
 	lv_label_set_text(m->l_line2, "");
-	lv_obj_align(m->l_line2, LV_ALIGN_BOTTOM_RIGHT, -(int32_t)lround(8.0 * m->k), -(int32_t)lround(4.0 * m->k));
+	lv_obj_align(m->l_line2, LV_ALIGN_BOTTOM_LEFT, left_of(m, "-127dBm"), -(int32_t)lround(4.0 * m->k));
 
 	redraw_scales(m);
 	return m;
