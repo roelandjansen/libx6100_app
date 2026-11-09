@@ -24,6 +24,7 @@ struct ui_scope_cfg {
 	ui_scope_drag_cb on_drag;
 	void *ud;
 	int32_t drag_px_per_step;
+	int32_t wf_line_h;
 };
 
 struct ui_scope {

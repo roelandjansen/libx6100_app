@@ -278,15 +278,23 @@ static void draw_spectrum(struct ui_scope *sc)
 	lv_obj_invalidate(sc->spec);
 }
 
+//
+// New line at the top, wf_line_h pixels high (waterfall speed)
+//
+
 static void draw_waterfall_row(struct ui_scope *sc)
 {
 	const int32_t w = sc->cfg.w;
 	const int32_t h = sc->cfg.wf_h;
+	const int32_t n = sc->cfg.wf_line_h > 0 && sc->cfg.wf_line_h < h ? sc->cfg.wf_line_h : 1;
 	int32_t x;
+	int32_t y;
 
-	memmove(sc->wf_buf + w, sc->wf_buf, (size_t)w * (size_t)(h - 1) * sizeof(uint16_t));
+	memmove(sc->wf_buf + (size_t)w * (size_t)n, sc->wf_buf, (size_t)w * (size_t)(h - n) * sizeof(uint16_t));
 	for (x = 0; x < w; x++)
 		sc->wf_buf[x] = sc->palette[sc->level[x]];
+	for (y = 1; y < n; y++)
+		memcpy(sc->wf_buf + (size_t)y * (size_t)w, sc->wf_buf, (size_t)w * sizeof(uint16_t));
 	lv_obj_invalidate(sc->wf);
 }
 

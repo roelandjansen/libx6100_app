@@ -579,6 +579,8 @@ static void build_scope(lv_obj_t *scr, int32_t spec_h, int32_t wf_h)
 	c.on_tap = on_scope_tap;
 	c.on_drag = on_scope_drag;
 	c.drag_px_per_step = U(10);
+	// about 1.5 design pixels per scope line: 3 px on a 1080 wide phone
+	c.wf_line_h = U(1.5f) > 1 ? U(1.5f) : 1;
 	ui_scope_create(&G.scope, scr, &c);
 
 	G.l_scope_mode = tap_label(G.scope.spec, G.f_small, C_ACCENT, "", on_scope_mode);

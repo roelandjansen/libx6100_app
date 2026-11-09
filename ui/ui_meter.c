@@ -353,7 +353,8 @@ struct ui_meter *ui_meter_create(lv_obj_t *parent, int32_t w, const void *ttf, s
 	lv_obj_set_style_text_font(m->l_line2, m->f_big, 0);
 	lv_obj_set_style_text_color(m->l_line2, lv_color_hex(C_GREY), 0);
 	lv_label_set_text(m->l_line2, "");
-	lv_obj_align(m->l_line2, LV_ALIGN_BOTTOM_LEFT, left_of(m, "-127dBm"), -(int32_t)lround(4.0 * m->k));
+	// dBm line right aligned: the unit stays put, the number grows to the left
+	lv_obj_align(m->l_line2, LV_ALIGN_BOTTOM_RIGHT, -(int32_t)lround(8.0 * m->k), -(int32_t)lround(4.0 * m->k));
 
 	redraw_scales(m);
 	return m;

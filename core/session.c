@@ -108,6 +108,7 @@ struct session {
 	struct ctl_cmd ctlq[C_CTL_QUEUE];
 	atomic_uint step_hz;
 	atomic_bool freq_lock;
+	atomic_bool tx_mute;
 
 	//
 	// TX (network thread, settings atomic)
@@ -291,12 +292,14 @@ static int do_ptt(struct session *s, bool on, int64_t now)
 			tx_audio_discard(s->tx);
 			atomic_store(&s->last_heartbeat, now);
 		}
+		atomic_store(&s->tx_mute, true);
 		s->ptt = true;
 		if (atomic_load(&s->ptt_timeout_en) && s->t_ptt_timeout == 0)
 			s->t_ptt_timeout = now + (int64_t)atomic_load(&s->ptt_timeout_s) * 1000;
 	} else {
 		s->ptt = false;
 		s->t_ptt_timeout = 0;
+		atomic_store(&s->tx_mute, false);
 	}
 
 	return 0;
@@ -312,6 +315,7 @@ static void ptt_guard(struct session *s, const char *why, int64_t now)
 		return;
 	if (do_ptt(s, false, now) != 0) {
 		s->ptt = false;
+		atomic_store(&s->tx_mute, false);
 		s->t_ptt_timeout = 0;
 	}
 	tx_notice(s, why);
@@ -524,6 +528,7 @@ static void ev_close_streams(void *ctx)
 
 	if (s->ptt) {
 		s->ptt = false;
+		atomic_store(&s->tx_mute, false);
 		s->t_ptt_timeout = 0;
 		tx_notice(s, "PTT released: streams closed");
 	}
@@ -817,6 +822,7 @@ static void *net_thread(void *arg)
 			// Link loss guard: PTT off locally (nothing reaches the server)
 			if (s->ptt) {
 				s->ptt = false;
+				atomic_store(&s->tx_mute, false);
 				s->t_ptt_timeout = 0;
 				tx_notice(s, "PTT released: link lost");
 			}
@@ -832,6 +838,7 @@ static void *net_thread(void *arg)
 		if (rig_ptt_off_now(&s->rig) == 0)
 			tx_notice(s, "PTT released: disconnect");
 		s->ptt = false;
+		atomic_store(&s->tx_mute, false);
 	}
 
 	control_shutdown(&s->ctl, clock_mono_ms());
@@ -868,6 +875,7 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 	atomic_init(&s->step_hz, 100u);
 	atomic_init(&s->freq_lock, false);
 	atomic_init(&s->last_heartbeat, 0);
+	atomic_init(&s->tx_mute, false);
 	atomic_init(&s->ptt_timeout_en, p->ptt_timeout_enabled);
 	atomic_init(&s->ptt_timeout_s, p->ptt_timeout_s < 30 ? 30 : (p->ptt_timeout_s > 999 ? 999 : p->ptt_timeout_s));
 
@@ -982,6 +990,11 @@ void session_audio_read(struct session *s, float *out, size_t frames)
 	}
 
 	audio_rx_read(s->arx, out, frames);
+
+	// Keyed from here: RX audio (the radio's monitor) muted locally, the
+	// ring still drains so the latency stays where it was
+	if (atomic_load_explicit(&s->tx_mute, memory_order_relaxed))
+		memset(out, 0, frames * 2 * sizeof(float));
 }
 
 void session_set_volume(struct session *s, uint8_t volume)
