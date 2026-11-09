@@ -3,12 +3,12 @@
 // Native (SDL) entry point.
 //
 // Test mode:
-//	radio <host> <control-port> <username> <password> [client-name] [rx-codec] [rx-rate] [latency-ms]
+//	radio <host> <control-port> <username> <password> [client-name] [rx-codec] [rx-rate] [latency-ms] [tx-codec] [tx-rate]
 // connects, prints state changes and counters once a second, plus
 // the decoded radio state (rig file from rigs/ in the current directory,
 // picked by the announced model), the scope as a text line and the first
-// CI-V frames. RX audio plays on the default
-// SDL device. Ctrl-C disconnects cleanly.
+// CI-V frames. RX audio plays on the default SDL device, TX audio comes from
+// the default SDL capture device. Ctrl-C disconnects cleanly (PTT off first).
 //
 
 #include <signal.h>
@@ -130,6 +130,11 @@ static void print_help(void)
 		"  set <value> <name...>   any rig file command by name\n"
 		"  get <name...>           read a rig file command once\n"
 		"  lock | unlock           frequency lock\n"
+		"  ptt <0|1>               PTT off / on (toggle, no heartbeat)\n"
+		"  tx <seconds>            PTT on, released after the given time\n"
+		"  tune                    ATU tune cycle (transmits)\n"
+		"  mic <percent>           mic gain, 100 = unity\n"
+		"  tot <0|30-999>          PTT timeout off / seconds (default 300)\n"
 		"  help\n");
 	fflush(stdout);
 }
@@ -141,6 +146,16 @@ static void report(const char *what, int rc)
 	else
 		printf("%s: queued\n", what);
 	fflush(stdout);
+}
+
+static int64_t G_TX_UNTIL;
+
+static int64_t mono_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
 static void handle_command(struct session *s, char *line)
@@ -200,6 +215,26 @@ static void handle_command(struct session *s, char *line)
 	} else if (strcmp(cmd, "lock") == 0 || strcmp(cmd, "unlock") == 0) {
 		session_set_freq_lock(s, cmd[0] == 'l');
 		printf("frequency lock: %s\n", cmd[0] == 'l' ? "on" : "off");
+	} else if (strcmp(cmd, "ptt") == 0) {
+		G_TX_UNTIL = 0;
+		report(cmd, tx_ptt(s, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "tx") == 0) {
+		a = strtol(rest, NULL, 10);
+		if (a <= 0)
+			return;
+		n = tx_ptt(s, 1);
+		if (n == 0)
+			G_TX_UNTIL = mono_ms() + a * 1000;
+		report(cmd, n);
+	} else if (strcmp(cmd, "tune") == 0) {
+		report(cmd, tx_tune(s));
+	} else if (strcmp(cmd, "mic") == 0) {
+		tx_set_mic_gain(s, (int)strtol(rest, NULL, 10));
+		printf("mic gain: %ld%%\n", strtol(rest, NULL, 10));
+	} else if (strcmp(cmd, "tot") == 0) {
+		a = strtol(rest, NULL, 10);
+		tx_set_ptt_timeout(s, a > 0, a > 0 ? (int)a : 300);
+		printf("ptt timeout: %s (from next PTT on)\n", a > 0 ? rest : "off");
 	} else {
 		printf("unknown command, try help\n");
 	}
@@ -263,8 +298,13 @@ static int run_test(int argc, char *argv[])
 	p.rx_codec = (uint8_t)(argc > 6 ? strtol(argv[6], NULL, 0) : 0x04);
 	p.rx_sample = (uint32_t)(argc > 7 ? strtol(argv[7], NULL, 10) : 48000);
 	p.rx_latency = (uint16_t)(argc > 8 ? strtol(argv[8], NULL, 10) : 150);
-	p.tx_codec = 0x04;
-	p.tx_sample = 48000;
+	p.tx_codec = (uint8_t)(argc > 9 ? strtol(argv[9], NULL, 0) : 0x04);
+	p.tx_sample = (uint32_t)(argc > 10 ? strtol(argv[10], NULL, 10) : 48000);
+	p.enable_ptt = true;
+	p.ptt_timeout_enabled = true;
+	p.ptt_timeout_s = 300;
+	p.ptt_heartbeat_ms = 0;
+	p.mic_gain = 100;
 	p.tx_latency = 150;
 	snprintf(p.rig_dir, sizeof(p.rig_dir), "%s", "rigs");
 
@@ -281,10 +321,20 @@ static int run_test(int argc, char *argv[])
 				p.dev_rate, p.rx_codec, p.rx_sample, p.rx_latency);
 	}
 
+	if (audio_sdl_capture_open(48000, &p.cap_rate) != 0) {
+		fprintf(stderr, "warning: no capture device, TX disabled\n");
+		p.cap_rate = 0;
+	} else {
+		printf("capture device: %u Hz, tx codec request 0x%02x at %u Hz\n",
+				p.cap_rate, p.tx_codec, p.tx_sample);
+	}
+
 	print_help();
 
 	if (session_connect(&s, &p, &hooks) != 0) {
 		fprintf(stderr, "error: cannot start session\n");
+		if (p.cap_rate != 0)
+			audio_sdl_capture_close();
 		if (p.dev_rate != 0)
 			audio_sdl_close();
 		return EXIT_FAILURE;
@@ -292,6 +342,8 @@ static int run_test(int argc, char *argv[])
 
 	if (p.dev_rate != 0)
 		audio_sdl_attach(s);
+	if (p.cap_rate != 0)
+		audio_sdl_capture_attach(s);
 
 	memset(&last, 0, sizeof(last));
 	last.state = SESSION_IDLE;
@@ -318,7 +370,26 @@ static int run_test(int argc, char *argv[])
 					now.audio_decode_errors, (double)now.audio_peak, now.retransmitted, now.requests_sent);
 			fflush(stdout);
 			print_radio(s);
+			printf("  tx: %s  ptt %d%s  codec 0x%02x %u Hz  blocks %u  packets %u  bytes %u  peak %.2f  rms %.2f  overrun %u  enc-err %u\n",
+					now.tx_available ? "available" : "none", now.ptt,
+					now.ptt_remaining_s > 0 ? " (timeout armed)" : "",
+					now.tx_codec, now.tx_sample, now.tx_blocks, now.tx_packets, now.tx_bytes,
+					(double)now.tx_peak, (double)now.tx_rms, now.tx_overrun_frames, now.tx_encode_errors);
+			if (now.ptt_remaining_s > 0)
+				printf("  ptt timeout in %d s\n", now.ptt_remaining_s);
+			fflush(stdout);
 		}
+
+		if (now.tx_notices != last.tx_notices) {
+			printf("tx notice: %s\n", now.tx_notice);
+			fflush(stdout);
+		}
+		if (G_TX_UNTIL != 0 && mono_ms() >= G_TX_UNTIL) {
+			G_TX_UNTIL = 0;
+			report("tx end", tx_ptt(s, 0));
+		}
+		if (now.ptt && p.cap_rate != 0 && !audio_sdl_capture_ok())
+			tx_capture_lost(s);
 
 		if (now.state == SESSION_FAILED || now.state == SESSION_LOST || now.state == SESSION_CLOSED) {
 			rc = EXIT_FAILURE;
@@ -329,6 +400,8 @@ static int run_test(int argc, char *argv[])
 		wait_commands(s, 1000);
 	}
 
+	if (p.cap_rate != 0)
+		audio_sdl_capture_close();
 	if (p.dev_rate != 0)
 		audio_sdl_close();
 	session_disconnect(s);
@@ -347,6 +420,7 @@ int main(int argc, char *argv[])
 	printf("libx6100_app native, SDL %u.%u.%u\n", ver.major, ver.minor, ver.patch);
 	printf("test mode: %s <host> <control-port> <username> <password> [client-name] [rx-codec] [rx-rate] [latency-ms]\n", argv[0]);
 	printf("  rx-codec: 0x01 ulaw, 0x02 pcm8, 0x04 pcm16 (default), 0x40 opus, 0x80 adpcm (mono rigs)\n");
+	printf("  tx-codec: 0x01 ulaw, 0x02 pcm8, 0x04 pcm16 (default), 0x40 opus, 0x80 adpcm; mono only\n");
 
 	return EXIT_SUCCESS;
 }

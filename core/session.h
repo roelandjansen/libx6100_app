@@ -50,6 +50,18 @@ struct profile {
 	//
 	char rig_dir[256];
 	int poll_ms;
+
+	//
+	// TX (phase 5): capture device rate (0 = no TX audio), PTT settings as
+	// wfview EnablePTT / PTTTimeoutEnabled / PTTTimeoutSeconds, heartbeat
+	// guard for hold-to-talk (0 = off), mic gain in percent
+	//
+	uint32_t cap_rate;
+	bool enable_ptt;
+	bool ptt_timeout_enabled;
+	int ptt_timeout_s;
+	int ptt_heartbeat_ms;
+	unsigned int mic_gain;
 };
 
 enum session_state {
@@ -117,6 +129,24 @@ struct session_info {
 	uint32_t ctl_queued;
 	uint32_t ctl_rejected;
 	int ctl_last_error;
+
+	//
+	// TX (phase 5)
+	//
+	bool tx_available;
+	bool ptt;
+	int ptt_remaining_s;
+	uint8_t tx_codec;
+	uint32_t tx_sample;
+	uint32_t tx_packets;
+	uint32_t tx_bytes;
+	uint32_t tx_blocks;
+	uint32_t tx_encode_errors;
+	uint32_t tx_overrun_frames;
+	float tx_peak;
+	float tx_rms;
+	uint32_t tx_notices;
+	char tx_notice[64];
 };
 
 struct session_hooks {
@@ -179,6 +209,9 @@ bool session_get_scope_row(struct session *s, int receiver, struct radio_scope_r
 
 #define SESSION_ERR_LOCKED	(-10)
 #define SESSION_ERR_FULL	(-11)
+#define SESSION_ERR_NO_TX	(-12)
+#define SESSION_ERR_PTT_DISABLED	(-13)
+#define SESSION_ERR_NOT_CONNECTED	(-14)
 
 enum session_ctl_op {
 	SESSION_CTL_FREQ,
@@ -186,7 +219,10 @@ enum session_ctl_op {
 	SESSION_CTL_MODE,
 	SESSION_CTL_VALUE,
 	SESSION_CTL_SPAN,
-	SESSION_CTL_GET
+	SESSION_CTL_GET,
+	SESSION_CTL_PTT,
+	SESSION_CTL_ATU_TUNE,
+	SESSION_CTL_CAPTURE_LOST
 };
 
 int session_set_freq(struct session *s, uint8_t vfo, uint64_t hz);
@@ -204,3 +240,23 @@ void session_set_step(struct session *s, uint32_t hz);
 uint32_t session_get_step(struct session *s);
 void session_set_freq_lock(struct session *s, bool locked);
 bool session_get_freq_lock(struct session *s);
+
+//
+// TX (phase 5, UI thread, non-blocking). PTT on needs a connected session,
+// a TX path (radio announced TX, codec usable, capture rate set) and
+// enable_ptt. With ptt_heartbeat_ms set, PTT is released when no
+// heartbeat arrives within that time while keyed.
+//
+
+int tx_ptt(struct session *s, int on);
+int tx_ptt_heartbeat(struct session *s);
+int tx_tune(struct session *s);
+void tx_set_mic_gain(struct session *s, int percent);
+void tx_set_ptt_timeout(struct session *s, int enabled, int seconds);
+
+//
+// TX capture (capture device callback / platform)
+//
+
+void tx_capture_write(struct session *s, const float *in, size_t frames, int channels);
+void tx_capture_lost(struct session *s);

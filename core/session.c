@@ -27,12 +27,14 @@
 #include "core/audio_stream.h"
 #include "core/civ_stream.h"
 #include "core/rig.h"
+#include "core/tx_audio.h"
 #include "core/udp_socket.h"
 
 #define C_POLL_MAX_MS		500
 #define C_LINK_LOSS_MS		(PROTO_STALE_CONNECTION_S * 1000)
 #define C_CIV_QUEUE		8192
 #define C_CTL_QUEUE		64
+#define C_TX_POLL_MS		10
 
 struct ctl_cmd {
 	enum session_ctl_op op;
@@ -106,6 +108,18 @@ struct session {
 	struct ctl_cmd ctlq[C_CTL_QUEUE];
 	atomic_uint step_hz;
 	atomic_bool freq_lock;
+
+	//
+	// TX (network thread, settings atomic)
+	//
+	struct tx_audio *tx;
+	bool tx_ready;
+	bool ptt;
+	bool rig_tx_prev;
+	int64_t t_ptt_timeout;
+	atomic_llong last_heartbeat;
+	atomic_bool ptt_timeout_en;
+	atomic_int ptt_timeout_s;
 };
 
 const char *session_state_name(enum session_state st)
@@ -197,6 +211,30 @@ static void update_info(struct session *s)
 		}
 		i->rx_codec = s->ctl.cfg.rx_codec;
 	}
+	i->tx_available = s->streams_open && s->tx_ready && s->rig_active && rig_has_ptt(&s->rig);
+	i->ptt = s->ptt;
+	i->ptt_remaining_s = 0;
+	if (s->ptt && s->t_ptt_timeout != 0) {
+		const int64_t left = s->t_ptt_timeout - clock_mono_ms();
+
+		i->ptt_remaining_s = left > 0 ? (int)((left + 999) / 1000) : 0;
+	}
+	i->tx_codec = s->ctl.cfg.tx_codec;
+	i->tx_sample = s->ctl.cfg.tx_sample;
+	if (s->streams_open) {
+		i->tx_packets = s->audio.packets_tx;
+		i->tx_bytes = s->audio.bytes_tx;
+	}
+	if (s->tx != NULL) {
+		struct tx_audio_stats ts;
+
+		tx_audio_get_stats(s->tx, &ts);
+		i->tx_blocks = ts.blocks;
+		i->tx_encode_errors = ts.encode_errors;
+		i->tx_overrun_frames = ts.overrun_frames;
+		i->tx_peak = ts.peak;
+		i->tx_rms = ts.rms;
+	}
 	i->retransmitted = s->ctl.s.stats.retransmitted;
 	i->requests_sent = s->ctl.s.stats.requests_sent;
 	if (s->streams_open) {
@@ -215,6 +253,105 @@ static void set_state(struct session *s, enum session_state st, enum session_rea
 	pthread_mutex_unlock(&s->lock);
 	update_info(s);
 	notify(s);
+}
+
+//
+// TX (network thread)
+//
+
+static void tx_notice(struct session *s, const char *msg)
+{
+	pthread_mutex_lock(&s->lock);
+	snprintf(s->info.tx_notice, sizeof(s->info.tx_notice), "%s", msg);
+	s->info.tx_notices++;
+	pthread_mutex_unlock(&s->lock);
+	notify(s);
+}
+
+//
+// PTT on / off as MainController::setPTT(): Transceiver Status, the PTT
+// timeout armed on PTT on (never extended), stopped on PTT off
+//
+
+static int do_ptt(struct session *s, bool on, int64_t now)
+{
+	int rc;
+
+	if (on && (!s->tx_ready || !s->rig_active))
+		return SESSION_ERR_NO_TX;
+	if (!s->rig_active)
+		return RIG_ERR_NO_CAPS;
+
+	rc = rig_ptt(&s->rig, on);
+	if (rc != 0)
+		return rc;
+
+	if (on) {
+		if (!s->ptt) {
+			tx_audio_discard(s->tx);
+			atomic_store(&s->last_heartbeat, now);
+		}
+		s->ptt = true;
+		if (atomic_load(&s->ptt_timeout_en) && s->t_ptt_timeout == 0)
+			s->t_ptt_timeout = now + (int64_t)atomic_load(&s->ptt_timeout_s) * 1000;
+	} else {
+		s->ptt = false;
+		s->t_ptt_timeout = 0;
+	}
+
+	return 0;
+}
+
+//
+// Local PTT release by a guard, with a notice
+//
+
+static void ptt_guard(struct session *s, const char *why, int64_t now)
+{
+	if (!s->ptt)
+		return;
+	if (do_ptt(s, false, now) != 0) {
+		s->ptt = false;
+		s->t_ptt_timeout = 0;
+	}
+	tx_notice(s, why);
+}
+
+static void emit_tx(void *ctx, const uint8_t *data, size_t len, float peak, float rms)
+{
+	struct session *s = ctx;
+
+	(void)peak;
+	(void)rms;
+	if (s->streams_open)
+		audio_stream_send_tx(&s->audio, data, len, clock_mono_ms());
+}
+
+static void tx_run(struct session *s, int64_t now)
+{
+	const int hb = s->prof.ptt_heartbeat_ms;
+
+	if (s->tx == NULL)
+		return;
+
+	if (!s->ptt || !s->tx_ready) {
+		tx_audio_discard(s->tx);
+		return;
+	}
+
+	// Timeout switched off while keyed: stop it (wfview ct_pttTimeout)
+	if (!atomic_load(&s->ptt_timeout_en))
+		s->t_ptt_timeout = 0;
+	if (s->t_ptt_timeout != 0 && now >= s->t_ptt_timeout) {
+		ptt_guard(s, "PTT timeout", now);
+		return;
+	}
+	if (hb > 0 && now - atomic_load(&s->last_heartbeat) > hb) {
+		ptt_guard(s, "PTT released: no heartbeat", now);
+		return;
+	}
+
+	tx_audio_pump(s->tx, emit_tx, s);
 }
 
 //
@@ -252,6 +389,16 @@ static void rig_changed(void *ctx, uint32_t groups)
 {
 	struct session *s = ctx;
 	int i;
+
+	// The radio has returned to receive, however that happened: stop the
+	// PTT timeout (MainController funcTransceiverStatus)
+	if (s->rig.st.transmit.valid) {
+		const bool tx = s->rig.st.transmit.value != 0;
+
+		if (s->rig_tx_prev && !tx)
+			s->t_ptt_timeout = 0;
+		s->rig_tx_prev = tx;
+	}
 
 	pthread_mutex_lock(&s->lock);
 	s->state = s->rig.st;
@@ -344,6 +491,17 @@ static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 		snprintf(s->ctl.status, sizeof(s->ctl.status), "Unsupported RX codec 0x%02x", s->ctl.cfg.rx_codec);
 	}
 
+	// TX path: only when the radio announced TX (tx_sample forced to 0 at
+	// login otherwise) and a capture device is configured
+	s->tx_ready = false;
+	if (s->tx != NULL && s->ctl.cfg.tx_sample != 0 && s->ctl.cfg.tx_codec != 0) {
+		if (tx_audio_configure(s->tx, s->ctl.cfg.tx_codec, s->ctl.cfg.tx_sample) == 0)
+			s->tx_ready = true;
+		else
+			snprintf(s->ctl.status, sizeof(s->ctl.status), "Unsupported TX codec 0x%02x at %u Hz",
+					s->ctl.cfg.tx_codec, (unsigned int)s->ctl.cfg.tx_sample);
+	}
+
 	s->streams_open = true;
 
 	// Rig layer: Transceiver ID broadcast first, rig file from the announced model
@@ -363,6 +521,15 @@ static void ev_close_streams(void *ctx)
 
 	if (!s->streams_open)
 		return;
+
+	if (s->ptt) {
+		s->ptt = false;
+		s->t_ptt_timeout = 0;
+		tx_notice(s, "PTT released: streams closed");
+	}
+	s->tx_ready = false;
+	if (s->tx != NULL)
+		tx_audio_stop(s->tx);
 
 	audio_stream_close(&s->audio);
 	civ_stream_close(&s->civ, now);
@@ -486,7 +653,12 @@ static void flush_ctl(struct session *s)
 		const struct ctl_cmd *c = &local[i];
 		int rc = RIG_ERR_NO_CAPS;
 
-		if (s->rig_active) {
+		if (c->op == SESSION_CTL_PTT) {
+			rc = do_ptt(s, c->a != 0, clock_mono_ms());
+		} else if (c->op == SESSION_CTL_CAPTURE_LOST) {
+			ptt_guard(s, "PTT released: capture lost", clock_mono_ms());
+			rc = 0;
+		} else if (s->rig_active) {
 			switch (c->op) {
 			case SESSION_CTL_FREQ:
 				rc = rig_set_freq(&s->rig, c->vfo, c->u);
@@ -505,6 +677,13 @@ static void flush_ctl(struct session *s)
 				break;
 			case SESSION_CTL_GET:
 				rc = rig_get(&s->rig, c->name, c->vfo);
+				break;
+			case SESSION_CTL_ATU_TUNE:
+				// MainController::tuneNow(): Tuner/ATU Status 2, Immediate, unique
+				rc = rig_set_value(&s->rig, "Tuner/ATU Status", 0, 2);
+				break;
+			case SESSION_CTL_PTT:
+			case SESSION_CTL_CAPTURE_LOST:
 				break;
 			}
 		}
@@ -584,6 +763,9 @@ static void *net_thread(void *arg)
 
 			timeout = d < 0 ? 0 : (d > C_POLL_MAX_MS ? C_POLL_MAX_MS : (int)d);
 		}
+		// Keyed: pick up captured audio every 10 ms (20 ms blocks)
+		if (s->ptt && timeout > C_TX_POLL_MS)
+			timeout = C_TX_POLL_MS;
 
 		pfd[n].fd = s->wake[0];
 		pfd[n++].events = POLLIN;
@@ -620,6 +802,8 @@ static void *net_thread(void *arg)
 
 		flush_civq(s, now);
 		flush_ctl(s);
+		if (s->streams_open)
+			tx_run(s, now);
 
 		control_tick(&s->ctl, now);
 		if (s->streams_open) {
@@ -630,11 +814,24 @@ static void *net_thread(void *arg)
 		}
 
 		if (s->heard && now - s->last_rx > C_LINK_LOSS_MS) {
+			// Link loss guard: PTT off locally (nothing reaches the server)
+			if (s->ptt) {
+				s->ptt = false;
+				s->t_ptt_timeout = 0;
+				tx_notice(s, "PTT released: link lost");
+			}
 			set_state(s, SESSION_LOST, SESSION_REASON_LINK_LOST);
 			break;
 		}
 
 		update_info(s);
+	}
+
+	// Leaving while keyed (disconnect, failure): PTT off straight to the rig
+	if (s->ptt && s->streams_open && s->rig_active) {
+		if (rig_ptt_off_now(&s->rig) == 0)
+			tx_notice(s, "PTT released: disconnect");
+		s->ptt = false;
 	}
 
 	control_shutdown(&s->ctl, clock_mono_ms());
@@ -670,10 +867,24 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 	s->u_audio.fd = -1;
 	atomic_init(&s->step_hz, 100u);
 	atomic_init(&s->freq_lock, false);
+	atomic_init(&s->last_heartbeat, 0);
+	atomic_init(&s->ptt_timeout_en, p->ptt_timeout_enabled);
+	atomic_init(&s->ptt_timeout_s, p->ptt_timeout_s < 30 ? 30 : (p->ptt_timeout_s > 999 ? 999 : p->ptt_timeout_s));
+
+	if (p->cap_rate != 0) {
+		s->tx = calloc(1, sizeof(*s->tx));
+		if (s->tx == NULL) {
+			free(s);
+			return -1;
+		}
+		tx_audio_init(s->tx, p->cap_rate);
+		tx_audio_set_gain(s->tx, p->mic_gain);
+	}
 
 	if (p->dev_rate != 0) {
 		s->arx = calloc(1, sizeof(*s->arx));
 		if (s->arx == NULL) {
+			free(s->tx);
 			free(s);
 			return -1;
 		}
@@ -682,6 +893,7 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 
 	if (pipe(s->wake) != 0) {
 		free(s->arx);
+		free(s->tx);
 		free(s);
 		return -1;
 	}
@@ -692,6 +904,7 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 		close(s->wake[1]);
 		pthread_mutex_destroy(&s->lock);
 		free(s->arx);
+		free(s->tx);
 		free(s);
 		return -1;
 	}
@@ -719,6 +932,10 @@ void session_disconnect(struct session *s)
 	if (s->arx != NULL) {
 		audio_rx_stop(s->arx);
 		free(s->arx);
+	}
+	if (s->tx != NULL) {
+		tx_audio_stop(s->tx);
+		free(s->tx);
 	}
 	free(s);
 }
@@ -915,4 +1132,91 @@ void session_set_freq_lock(struct session *s, bool locked)
 bool session_get_freq_lock(struct session *s)
 {
 	return atomic_load(&s->freq_lock);
+}
+
+//
+// TX (phase 5)
+//
+
+int tx_ptt(struct session *s, int on)
+{
+	struct ctl_cmd c;
+	bool connected;
+	bool available;
+
+	pthread_mutex_lock(&s->lock);
+	connected = s->info.state == SESSION_CONNECTED;
+	available = s->info.tx_available;
+	pthread_mutex_unlock(&s->lock);
+
+	// PTT off is always passed on
+	if (on) {
+		if (!s->prof.enable_ptt)
+			return SESSION_ERR_PTT_DISABLED;
+		if (!connected)
+			return SESSION_ERR_NOT_CONNECTED;
+		if (!available)
+			return SESSION_ERR_NO_TX;
+		atomic_store(&s->last_heartbeat, clock_mono_ms());
+	}
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_PTT;
+	c.a = on != 0;
+	return ctl_push(s, &c);
+}
+
+int tx_ptt_heartbeat(struct session *s)
+{
+	atomic_store(&s->last_heartbeat, clock_mono_ms());
+	return 0;
+}
+
+int tx_tune(struct session *s)
+{
+	struct ctl_cmd c;
+	bool connected;
+
+	if (!s->prof.enable_ptt)
+		return SESSION_ERR_PTT_DISABLED;
+
+	pthread_mutex_lock(&s->lock);
+	connected = s->info.state == SESSION_CONNECTED;
+	pthread_mutex_unlock(&s->lock);
+	if (!connected)
+		return SESSION_ERR_NOT_CONNECTED;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_ATU_TUNE;
+	return ctl_push(s, &c);
+}
+
+void tx_set_mic_gain(struct session *s, int percent)
+{
+	if (s->tx != NULL)
+		tx_audio_set_gain(s->tx, percent < 0 ? 0u : (unsigned int)percent);
+}
+
+void tx_set_ptt_timeout(struct session *s, int enabled, int seconds)
+{
+	// qBound(30, PTTTimeoutSeconds, 999) as wfview; applies from the next PTT on
+	atomic_store(&s->ptt_timeout_s, seconds < 30 ? 30 : (seconds > 999 ? 999 : seconds));
+	atomic_store(&s->ptt_timeout_en, enabled != 0);
+}
+
+void tx_capture_write(struct session *s, const float *in, size_t frames, int channels)
+{
+	if (s != NULL && s->tx != NULL)
+		tx_audio_write(s->tx, in, frames, channels);
+}
+
+void tx_capture_lost(struct session *s)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_CAPTURE_LOST;
+	if (ctl_push(s, &c) != 0) {
+		// Queue full: the heartbeat guard (if set) or PTT timeout still applies
+	}
 }

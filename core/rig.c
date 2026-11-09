@@ -1357,3 +1357,61 @@ int rig_get(struct rig *r, const char *type, uint8_t receiver)
 	rig_queue_add(r, RIG_PRIO_IMMEDIATE, &it, true);
 	return 0;
 }
+
+//
+// PTT (phase 5): Transceiver Status at priority Immediate, not unique,
+// as MainController::setPTT() queue->add(priorityImmediate, ...)
+//
+
+static int ptt_item(struct rig *r, bool on, struct rig_item *it)
+{
+	const int cmd = rig_cmd_index(r, "Transceiver Status");
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (cmd < 0 || !r->def.cmds[cmd].set)
+		return RIG_ERR_UNSUPPORTED;
+
+	it->cmd = cmd;
+	it->receiver = 0;
+	it->recurring = false;
+	it->has_value = true;
+	it->value = on ? 1 : 0;
+	it->range_check = false;
+	it->vlen = 1;
+	it->val[0] = on ? 1 : 0;
+	return 0;
+}
+
+int rig_ptt(struct rig *r, bool on)
+{
+	struct rig_item it;
+	const int rc = ptt_item(r, on, &it);
+
+	if (rc != 0)
+		return rc;
+	rig_queue_add(r, RIG_PRIO_IMMEDIATE, &it, false);
+	return 0;
+}
+
+//
+// PTT off sent at once, bypassing the scheduler (session shutdown while keyed)
+//
+
+int rig_ptt_off_now(struct rig *r)
+{
+	struct rig_item it;
+	const int rc = ptt_item(r, false, &it);
+
+	if (rc != 0)
+		return rc;
+	send_item(r, &it);
+	return 0;
+}
+
+bool rig_has_ptt(const struct rig *r)
+{
+	const int cmd = rig_cmd_index(r, "Transceiver Status");
+
+	return r->have_caps && cmd >= 0 && r->def.cmds[cmd].set;
+}

@@ -147,3 +147,11 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value);
 int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz);
 int rig_get(struct rig *r, const char *type, uint8_t receiver);
 uint64_t rig_round_frequency(uint64_t freq, int steps, uint32_t step_hz);
+
+//
+// TX (phase 5)
+//
+
+int rig_ptt(struct rig *r, bool on);
+int rig_ptt_off_now(struct rig *r);
+bool rig_has_ptt(const struct rig *r);

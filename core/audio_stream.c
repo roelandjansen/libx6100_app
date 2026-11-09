@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Audio UDP stream: RX audio packets, late-packet drop, 30 s watchdog.
+// Audio UDP stream: RX and TX audio packets, late-packet drop, 30 s watchdog.
 //
 // Port of the stream part of icomUdpAudio from wfview v3-initial
 // src/radio/icomudpaudio.cpp,
@@ -105,4 +105,37 @@ int64_t audio_stream_next_deadline(const struct audio_stream *a)
 		t = a->t_watchdog;
 
 	return t;
+}
+
+//
+// TX audio packets as wfview icomUdpAudio::receiveAudioData()
+//
+
+int audio_stream_send_tx(struct audio_stream *a, const uint8_t *data, size_t len, int64_t now_ms)
+{
+	uint8_t pkt[AUDIO_HEADER + AUDIO_TX_CHUNK];
+	size_t off = 0;
+	int rc = 0;
+
+	while (off < len) {
+		const size_t n = len - off > AUDIO_TX_CHUNK ? AUDIO_TX_CHUNK : len - off;
+
+		memset(pkt, 0, AUDIO_HEADER);
+		proto_put_le32(pkt + PROTO_OFF_LEN, (uint32_t)(AUDIO_HEADER + n));
+		proto_put_le32(pkt + PROTO_OFF_SENTID, a->s.my_id);
+		proto_put_le32(pkt + PROTO_OFF_RCVDID, a->s.remote_id);
+		proto_put_le16(pkt + AUDIO_OFF_IDENT, n == 0xa0 ? 0x9781 : 0x0080);
+		proto_put_be16(pkt + AUDIO_OFF_SENDSEQ, a->tx_audio_seq);
+		proto_put_be16(pkt + AUDIO_OFF_DATALEN, (uint16_t)n);
+		memcpy(pkt + AUDIO_HEADER, data + off, n);
+
+		if (udp_stream_send_tracked(&a->s, pkt, AUDIO_HEADER + n, now_ms) != 0)
+			rc = -1;
+		a->tx_audio_seq++;
+		a->packets_tx++;
+		a->bytes_tx += (uint32_t)n;
+		off += n;
+	}
+
+	return rc;
 }

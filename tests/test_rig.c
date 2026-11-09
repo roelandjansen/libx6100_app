@@ -388,6 +388,10 @@ static void test_controls(void)
 	static const uint8_t C_PRE[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x16, 0x02, 0x01, 0xfd };
 	static const uint8_t C_AGC_GET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x16, 0x12, 0xfd };
 	static const uint8_t C_SPAN_GET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x27, 0x15, 0x00, 0xfd };
+	static const uint8_t C_PTT_ON[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1c, 0x00, 0x01, 0xfd };
+	static const uint8_t C_PTT_OFF[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1c, 0x00, 0x00, 0xfd };
+	static const uint8_t C_PTT_GET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1c, 0x00, 0xfd };
+	static const uint8_t C_TUNE[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1c, 0x01, 0x02, 0xfd };
 	static const uint8_t C_ID_REPLY[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
 	int64_t t = 0;
 
@@ -454,6 +458,22 @@ static void test_controls(void)
 	CHECK(sent_bytes(C_SPAN, sizeof(C_SPAN)));
 	CHECK(sent_bytes(C_SMODE, sizeof(C_SMODE)));
 	CHECK(sent_bytes(C_SPAN_GET, sizeof(C_SPAN_GET)));
+
+	// PTT (1C 00, Immediate, not unique) and ATU tune (1C 01 02)
+	G.n = 0;
+	CHECK(rig_has_ptt(&G_RIG));
+	CHECK(rig_ptt(&G_RIG, true) == 0);
+	CHECK(rig_set_value(&G_RIG, "Tuner/ATU Status", 0, 2) == 0);
+	CHECK(rig_set_value(&G_RIG, "Tuner/ATU Status", 0, 3) == RIG_ERR_RANGE);
+	drain(&t);
+	CHECK(sent_bytes(C_PTT_ON, sizeof(C_PTT_ON)));
+	CHECK(sent_bytes(C_TUNE, sizeof(C_TUNE)));
+	CHECK(sent_bytes(C_PTT_GET, sizeof(C_PTT_GET)));
+
+	// PTT off straight out, without a tick
+	G.n = 0;
+	CHECK(rig_ptt_off_now(&G_RIG) == 0);
+	CHECK(G.n == 1 && sent_bytes(C_PTT_OFF, sizeof(C_PTT_OFF)));
 }
 
 int main(void)
