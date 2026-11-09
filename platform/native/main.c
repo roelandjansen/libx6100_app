@@ -12,11 +12,14 @@
 //
 
 #include <signal.h>
+#include <stdbool.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <poll.h>
+#include <unistd.h>
 
 #include <SDL.h>
 
@@ -32,13 +35,6 @@ static void on_signal(int sig)
 {
 	(void)sig;
 	G_STOP = 1;
-}
-
-static void sleep_ms(long ms)
-{
-	struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };
-
-	nanosleep(&ts, NULL);
 }
 
 //
@@ -80,7 +76,7 @@ static void print_radio(struct session *s)
 	}
 
 	rx = &st.rx[0];
-	printf("  %s (0x%02x)  A %.6f MHz %s %s  B %.6f MHz  S %d (%.1f)  agc %d  tx %d  decoded %u  unmatched %u  rows %u\n",
+	printf("  %s (0x%02x)  A %.6f MHz %s %s  B %.6f MHz  S %d (%.1f)  agc %d  pre %d  att %d  rfg %d  span %d  smode %d  tx %d  step %u%s  decoded %u  unmatched %u  rows %u\n",
 			st.model, st.model_id,
 			rx->freq_valid[0] ? (double)rx->freq_hz[0] / 1e6 : 0.0,
 			rx->mode[0].valid ? rx->mode[0].name : "-",
@@ -89,7 +85,13 @@ static void print_radio(struct session *s)
 			st.meter[RADIO_METER_S].valid ? st.meter[RADIO_METER_S].raw : -1,
 			st.meter[RADIO_METER_S].valid ? st.meter[RADIO_METER_S].cal : 0.0,
 			st.agc.valid ? st.agc.value : -1,
+			st.preamp.valid ? st.preamp.value : -1,
+			st.attenuator.valid ? st.attenuator.value : -1,
+			st.rf_gain.valid ? st.rf_gain.value : -1,
+			rx->scope.span_hz.valid ? rx->scope.span_hz.value : -1,
+			rx->scope.mode.valid ? rx->scope.mode.value : -1,
 			st.transmit.valid ? st.transmit.value : -1,
+			session_get_step(s), session_get_freq_lock(s) ? " LOCK" : "",
 			st.frames_decoded, st.frames_unmatched, st.scope_rows);
 
 	if (session_get_scope_row(s, 0, &row) && row.len > 0 && st.amp_max > 0) {
@@ -108,6 +110,126 @@ static void print_radio(struct session *s)
 		}
 		spark[64] = '\0';
 		printf("  scope %.3f-%.3f MHz |%s|\n", (double)row.low_hz / 1e6, (double)row.high_hz / 1e6, spark);
+	}
+}
+
+//
+// Interactive controls on stdin, one command per line
+//
+
+static void print_help(void)
+{
+	printf("commands:\n"
+		"  f <hz> | fb <hz>        set VFO A / B frequency\n"
+		"  u [n] | d [n]           tune VFO A up / down n steps\n"
+		"  step <hz>               tuning step\n"
+		"  mode <num> [filter]     rig file mode number (X6100: LSB 0 USB 1 AM 2 CW 3 FM 5 CW-R 6), filter 1-3\n"
+		"  agc <1-3>  pre <0|1>  att <n>  rfg <0-255>\n"
+		"  span <hz>               half span, e.g. 24000\n"
+		"  smode <0-3>             scope mode (0 center, 1 fixed)\n"
+		"  set <value> <name...>   any rig file command by name\n"
+		"  get <name...>           read a rig file command once\n"
+		"  lock | unlock           frequency lock\n"
+		"  help\n");
+	fflush(stdout);
+}
+
+static void report(const char *what, int rc)
+{
+	if (rc != 0)
+		printf("%s: rejected (%d)\n", what, rc);
+	else
+		printf("%s: queued\n", what);
+	fflush(stdout);
+}
+
+static void handle_command(struct session *s, char *line)
+{
+	char cmd[32] = "";
+	char rest[160] = "";
+	long a = 0;
+	long b = -1;
+	int n;
+
+	line[strcspn(line, "\r\n")] = '\0';
+	n = sscanf(line, "%31s %159[^\n]", cmd, rest);
+	if (n < 1)
+		return;
+
+	if (strcmp(cmd, "help") == 0) {
+		print_help();
+	} else if (strcmp(cmd, "f") == 0 || strcmp(cmd, "fb") == 0) {
+		report(cmd, session_set_freq(s, cmd[1] == 'b' ? 1 : 0, strtoull(rest, NULL, 10)));
+	} else if (strcmp(cmd, "u") == 0 || strcmp(cmd, "d") == 0) {
+		a = n > 1 ? strtol(rest, NULL, 10) : 1;
+		report(cmd, session_tune(s, 0, (int)(cmd[0] == 'u' ? a : -a)));
+	} else if (strcmp(cmd, "step") == 0) {
+		session_set_step(s, (uint32_t)strtoul(rest, NULL, 10));
+		printf("step: %u Hz\n", session_get_step(s));
+	} else if (strcmp(cmd, "mode") == 0) {
+		if (sscanf(rest, "%ld %ld", &a, &b) < 1)
+			return;
+		if (b < 0) {
+			struct radio_state st;
+
+			session_get_state(s, &st);
+			b = st.rx[0].mode[0].valid ? st.rx[0].mode[0].filter : 1;
+		}
+		report(cmd, session_set_mode(s, 0, (int)a, 0, (int)b));
+	} else if (strcmp(cmd, "agc") == 0) {
+		report(cmd, session_set_value(s, "AGC Status", 0, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "pre") == 0) {
+		report(cmd, session_set_value(s, "Preamp Status", 0, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "att") == 0) {
+		report(cmd, session_set_value(s, "Attenuator Status", 0, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "rfg") == 0) {
+		report(cmd, session_set_value(s, "RF Gain", 0, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "span") == 0) {
+		report(cmd, session_set_span(s, 0, (uint32_t)strtoul(rest, NULL, 10)));
+	} else if (strcmp(cmd, "smode") == 0) {
+		report(cmd, session_set_value(s, "Scope Mode", 0, (int)strtol(rest, NULL, 10)));
+	} else if (strcmp(cmd, "set") == 0) {
+		char *name = NULL;
+
+		a = strtol(rest, &name, 10);
+		while (name != NULL && *name == ' ')
+			name++;
+		report(cmd, session_set_value(s, name != NULL ? name : "", 0, (int)a));
+	} else if (strcmp(cmd, "get") == 0) {
+		report(cmd, session_get_value(s, rest, 0));
+	} else if (strcmp(cmd, "lock") == 0 || strcmp(cmd, "unlock") == 0) {
+		session_set_freq_lock(s, cmd[0] == 'l');
+		printf("frequency lock: %s\n", cmd[0] == 'l' ? "on" : "off");
+	} else {
+		printf("unknown command, try help\n");
+	}
+	fflush(stdout);
+}
+
+//
+// Wait up to ms for stdin lines, handling each as a command
+//
+
+static void wait_commands(struct session *s, int ms)
+{
+	static bool eof;
+	struct pollfd pfd = { STDIN_FILENO, POLLIN, 0 };
+	char line[256];
+
+	if (eof) {
+		poll(NULL, 0, ms);
+		return;
+	}
+
+	// First wait up to ms, then take whatever else is already waiting
+	while (poll(&pfd, 1, ms) > 0 && (pfd.revents & (POLLIN | POLLHUP))) {
+		if (fgets(line, sizeof(line), stdin) == NULL) {
+			eof = true;
+			poll(NULL, 0, ms);
+			return;
+		}
+		handle_command(s, line);
+		ms = 0;
 	}
 }
 
@@ -159,6 +281,8 @@ static int run_test(int argc, char *argv[])
 				p.dev_rate, p.rx_codec, p.rx_sample, p.rx_latency);
 	}
 
+	print_help();
+
 	if (session_connect(&s, &p, &hooks) != 0) {
 		fprintf(stderr, "error: cannot start session\n");
 		if (p.dev_rate != 0)
@@ -202,7 +326,7 @@ static int run_test(int argc, char *argv[])
 		}
 
 		last = now;
-		sleep_ms(1000);
+		wait_commands(s, 1000);
 	}
 
 	if (p.dev_rate != 0)

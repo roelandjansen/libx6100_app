@@ -32,6 +32,17 @@
 #define C_POLL_MAX_MS		500
 #define C_LINK_LOSS_MS		(PROTO_STALE_CONNECTION_S * 1000)
 #define C_CIV_QUEUE		8192
+#define C_CTL_QUEUE		64
+
+struct ctl_cmd {
+	enum session_ctl_op op;
+	uint8_t vfo;
+	uint64_t u;
+	int a;
+	int b;
+	int c;
+	char name[RIG_NAME_LEN];
+};
 
 struct session {
 
@@ -87,6 +98,14 @@ struct session {
 	struct session_info info;
 	struct radio_state state;
 	struct radio_scope_row rows[RADIO_MAX_RX];
+
+	//
+	// Control queue (under lock) and client-side settings
+	//
+	size_t ctlq_n;
+	struct ctl_cmd ctlq[C_CTL_QUEUE];
+	atomic_uint step_hz;
+	atomic_bool freq_lock;
 };
 
 const char *session_state_name(enum session_state st)
@@ -447,6 +466,58 @@ static void flush_civq(struct session *s, int64_t now)
 	}
 }
 
+//
+// Run queued controls (network thread)
+//
+
+static void flush_ctl(struct session *s)
+{
+	struct ctl_cmd local[C_CTL_QUEUE];
+	size_t n;
+	size_t i;
+
+	pthread_mutex_lock(&s->lock);
+	n = s->ctlq_n;
+	memcpy(local, s->ctlq, n * sizeof(local[0]));
+	s->ctlq_n = 0;
+	pthread_mutex_unlock(&s->lock);
+
+	for (i = 0; i < n; i++) {
+		const struct ctl_cmd *c = &local[i];
+		int rc = RIG_ERR_NO_CAPS;
+
+		if (s->rig_active) {
+			switch (c->op) {
+			case SESSION_CTL_FREQ:
+				rc = rig_set_freq(&s->rig, c->vfo, c->u);
+				break;
+			case SESSION_CTL_TUNE:
+				rc = rig_tune(&s->rig, c->vfo, c->a, (uint32_t)c->u);
+				break;
+			case SESSION_CTL_MODE:
+				rc = rig_set_mode(&s->rig, c->vfo, c->a, c->b, c->c);
+				break;
+			case SESSION_CTL_VALUE:
+				rc = rig_set_value(&s->rig, c->name, c->vfo, c->a);
+				break;
+			case SESSION_CTL_SPAN:
+				rc = rig_set_span(&s->rig, c->vfo, (uint32_t)c->u);
+				break;
+			case SESSION_CTL_GET:
+				rc = rig_get(&s->rig, c->name, c->vfo);
+				break;
+			}
+		}
+
+		if (rc != 0) {
+			pthread_mutex_lock(&s->lock);
+			s->info.ctl_rejected++;
+			s->info.ctl_last_error = rc;
+			pthread_mutex_unlock(&s->lock);
+		}
+	}
+}
+
 static int64_t min_deadline(int64_t a, int64_t b)
 {
 	if (a == 0)
@@ -548,6 +619,7 @@ static void *net_thread(void *arg)
 			break;
 
 		flush_civq(s, now);
+		flush_ctl(s);
 
 		control_tick(&s->ctl, now);
 		if (s->streams_open) {
@@ -596,6 +668,8 @@ int session_connect(struct session **out, const struct profile *p, const struct 
 	s->u_ctl.fd = -1;
 	s->u_civ.fd = -1;
 	s->u_audio.fd = -1;
+	atomic_init(&s->step_hz, 100u);
+	atomic_init(&s->freq_lock, false);
 
 	if (p->dev_rate != 0) {
 		s->arx = calloc(1, sizeof(*s->arx));
@@ -720,4 +794,125 @@ bool session_get_scope_row(struct session *s, int receiver, struct radio_scope_r
 	}
 	pthread_mutex_unlock(&s->lock);
 	return ok;
+}
+
+//
+// Controls: push onto the queue and wake the network thread
+//
+
+static int ctl_push(struct session *s, const struct ctl_cmd *c)
+{
+	const uint8_t b = 1;
+	int rc = 0;
+
+	pthread_mutex_lock(&s->lock);
+	if (s->ctlq_n == C_CTL_QUEUE) {
+		rc = SESSION_ERR_FULL;
+	} else {
+		s->ctlq[s->ctlq_n++] = *c;
+		s->info.ctl_queued++;
+	}
+	pthread_mutex_unlock(&s->lock);
+
+	if (rc == 0 && write(s->wake[1], &b, 1) < 0) {
+		// Picked up on the next poll timeout (<= 500 ms)
+	}
+
+	return rc;
+}
+
+int session_set_freq(struct session *s, uint8_t vfo, uint64_t hz)
+{
+	struct ctl_cmd c;
+
+	if (atomic_load(&s->freq_lock))
+		return SESSION_ERR_LOCKED;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_FREQ;
+	c.vfo = vfo;
+	c.u = hz;
+	return ctl_push(s, &c);
+}
+
+int session_tune(struct session *s, uint8_t vfo, int steps)
+{
+	struct ctl_cmd c;
+
+	if (atomic_load(&s->freq_lock))
+		return SESSION_ERR_LOCKED;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_TUNE;
+	c.vfo = vfo;
+	c.a = steps;
+	c.u = atomic_load(&s->step_hz);
+	return ctl_push(s, &c);
+}
+
+int session_set_mode(struct session *s, uint8_t vfo, int mode_num, int data, int filter)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_MODE;
+	c.vfo = vfo;
+	c.a = mode_num;
+	c.b = data;
+	c.c = filter;
+	return ctl_push(s, &c);
+}
+
+int session_set_value(struct session *s, const char *type, uint8_t receiver, int value)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_VALUE;
+	c.vfo = receiver;
+	c.a = value;
+	snprintf(c.name, sizeof(c.name), "%s", type);
+	return ctl_push(s, &c);
+}
+
+int session_set_span(struct session *s, uint8_t receiver, uint32_t half_span_hz)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_SPAN;
+	c.vfo = receiver;
+	c.u = half_span_hz;
+	return ctl_push(s, &c);
+}
+
+int session_get_value(struct session *s, const char *type, uint8_t receiver)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_GET;
+	c.vfo = receiver;
+	snprintf(c.name, sizeof(c.name), "%s", type);
+	return ctl_push(s, &c);
+}
+
+void session_set_step(struct session *s, uint32_t hz)
+{
+	atomic_store(&s->step_hz, hz == 0 ? 1u : hz);
+}
+
+uint32_t session_get_step(struct session *s)
+{
+	return atomic_load(&s->step_hz);
+}
+
+void session_set_freq_lock(struct session *s, bool locked)
+{
+	atomic_store(&s->freq_lock, locked);
+}
+
+bool session_get_freq_lock(struct session *s)
+{
+	return atomic_load(&s->freq_lock);
 }

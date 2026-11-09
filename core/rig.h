@@ -44,7 +44,10 @@ struct rig_item {
 	uint8_t receiver;
 	bool recurring;
 	bool has_value;
-	int value;
+	int value;		// for the min/max range check (int-like values only)
+	bool range_check;
+	uint8_t vlen;		// encoded value bytes appended after the command
+	uint8_t val[8];
 };
 
 #define RIG_CMD_ID	(-2)
@@ -128,3 +131,19 @@ int64_t rig_next_deadline(const struct rig *r);
 
 int rig_cmd_index(const struct rig *r, const char *type);
 void rig_queue_add(struct rig *r, enum rig_prio prio, const struct rig_item *it, bool unique);
+
+//
+// Controls (phase 4). Return 0 queued, RIG_ERR_* otherwise.
+//
+
+#define RIG_ERR_NO_CAPS		(-1)
+#define RIG_ERR_UNSUPPORTED	(-2)
+#define RIG_ERR_RANGE		(-3)
+
+int rig_set_freq(struct rig *r, uint8_t vfo, uint64_t hz);
+int rig_tune(struct rig *r, uint8_t vfo, int steps, uint32_t step_hz);
+int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter);
+int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value);
+int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz);
+int rig_get(struct rig *r, const char *type, uint8_t receiver);
+uint64_t rig_round_frequency(uint64_t freq, int steps, uint32_t step_hz);

@@ -374,6 +374,12 @@ static void add_named(struct rig *r, enum rig_prio prio, const char *type, bool 
 	it.recurring = recurring;
 	it.has_value = has_value;
 	it.value = value;
+	it.range_check = has_value;
+	it.vlen = 0;
+	if (has_value) {
+		it.val[0] = bcd_encode_char(value);
+		it.vlen = 1;
+	}
 	rig_queue_add(r, prio, &it, false);
 }
 
@@ -404,7 +410,7 @@ static void send_item(struct rig *r, const struct rig_item *it)
 	c = &r->def.cmds[it->cmd];
 	k = r->kind[it->cmd];
 
-	if (it->has_value && (it->value < c->min || it->value > c->max))
+	if (it->has_value && it->range_check && (it->value < c->min || it->value > c->max))
 		return;
 
 	f[n++] = r->civ_addr;
@@ -423,10 +429,24 @@ static void send_item(struct rig *r, const struct rig_item *it)
 	}
 
 	if (it->has_value) {
+		struct rig_item get;
+
 		if (!c->set)
 			return;
-		// uchar values: BCD encoded (bcdEncodeChar); phase 4 adds the other types
-		f[n++] = bcd_encode_char(it->value);
+		memcpy(f + n, it->val, it->vlen);
+		n += it->vlen;
+
+		// A set of a gettable command queues a get to read the new value back
+		if (c->get && k != K_SCOPE_RX_OTHER) {
+			get.cmd = it->cmd;
+			get.receiver = it->receiver;
+			get.recurring = false;
+			get.has_value = false;
+			get.value = 0;
+			get.range_check = false;
+			get.vlen = 0;
+			rig_queue_add(r, RIG_PRIO_IMMEDIATE, &get, true);
+		}
 	}
 
 	f[n++] = 0xfd;
@@ -521,6 +541,14 @@ static void have_rig_id(struct rig *r, int model)
 		add_named(r, RIG_PRIO_HIGH, "Scope Data Output", false, 0, true, 1);
 		for (rx = 0; rx < (uint8_t)r->st.receivers; rx++)
 			add_named(r, RIG_PRIO_MEDIUM_HIGH, "Scope Ref", false, rx, false, 0);
+	}
+
+	// Additions 5 and 6 (agreed, not in wfview): read AGC and the scope span
+	// once at start-up so the UI shows real values; both are in the rig file
+	add_named(r, RIG_PRIO_IMMEDIATE, "AGC Status", false, 0, false, 0);
+	if (r->def.has_spectrum) {
+		for (rx = 0; rx < (uint8_t)r->st.receivers; rx++)
+			add_named(r, RIG_PRIO_IMMEDIATE, "Scope Span", false, rx, false, 0);
 	}
 
 	if (r->ev.changed != NULL)
@@ -1008,4 +1036,292 @@ void rig_tick(struct rig *r, int64_t now_ms)
 int64_t rig_next_deadline(const struct rig *r)
 {
 	return r->failed ? 0 : r->t_next;
+}
+
+//
+// ---- Controls (phase 4) ----
+//
+
+//
+// makeFreqPayload(freq, 5): BCD, least significant byte first
+//
+
+static uint8_t freq_payload(uint64_t hz, uint8_t *out)
+{
+	uint8_t n = hz >= 10000000000ull ? 6 : 5;
+	uint8_t i;
+
+	for (i = 0; i < n; i++) {
+		uint8_t a = (uint8_t)(hz % 10);
+
+		hz /= 10;
+		a = (uint8_t)(a | (hz % 10) << 4);
+		hz /= 10;
+		out[i] = a;
+	}
+
+	return n;
+}
+
+//
+// bcdEncodeInt(quint16): 0..9999 as two BCD bytes
+//
+
+static uint8_t bcd_encode_int(int v, uint8_t *out)
+{
+	if (v < 0 || v > 9999)
+		return 0;
+	out[0] = (uint8_t)((v / 100) % 10 | ((v / 1000) << 4));
+	out[1] = (uint8_t)(v % 10 | ((v / 10) % 10) << 4);
+	return 2;
+}
+
+//
+// Queue a set at Immediate priority, unique (a newer set replaces a pending one)
+//
+
+static int queue_set(struct rig *r, int cmd, uint8_t receiver, const uint8_t *val, uint8_t vlen,
+		bool range_check, int value)
+{
+	struct rig_item it;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (cmd < 0 || !r->def.cmds[cmd].set)
+		return RIG_ERR_UNSUPPORTED;
+	if (range_check && (value < r->def.cmds[cmd].min || value > r->def.cmds[cmd].max))
+		return RIG_ERR_RANGE;
+
+	it.cmd = cmd;
+	it.receiver = receiver;
+	it.recurring = false;
+	it.has_value = true;
+	it.value = value;
+	it.range_check = range_check;
+	it.vlen = vlen;
+	memcpy(it.val, val, vlen);
+	rig_queue_add(r, RIG_PRIO_IMMEDIATE, &it, true);
+	return 0;
+}
+
+//
+// Frequency command for a VFO (getVfoCommand, non-command29 rigs)
+//
+
+static int freq_cmd(const struct rig *r, uint8_t vfo)
+{
+	int c = rig_cmd_index(r, vfo ? "Unselected Freq" : "Selected Freq");
+
+	if (c < 0 && vfo == 0)
+		c = rig_cmd_index(r, "Freq Set");
+	return c;
+}
+
+static int mode_cmd(const struct rig *r, uint8_t vfo)
+{
+	int c = rig_cmd_index(r, vfo ? "Unselected Mode" : "Selected Mode");
+
+	if (c < 0 && vfo == 0)
+		c = rig_cmd_index(r, "Mode Set");
+	return c;
+}
+
+//
+// Set a VFO frequency. The model shows the new value at once (wfview
+// setFrequencyA(f, false)); the read-back after the set corrects it.
+//
+
+int rig_set_freq(struct rig *r, uint8_t vfo, uint64_t hz)
+{
+	uint8_t val[8];
+	const uint8_t n = freq_payload(hz, val);
+	int rc;
+
+	if (vfo > 1)
+		return RIG_ERR_RANGE;
+
+	rc = queue_set(r, freq_cmd(r, vfo), 0, val, n, false, 0);
+	if (rc == 0) {
+		r->st.rx[0].freq_hz[vfo] = hz;
+		r->st.rx[0].freq_valid[vfo] = true;
+		if (r->ev.changed != NULL)
+			r->ev.changed(r->ev.ctx, RADIO_CHG_FREQ);
+	}
+
+	return rc;
+}
+
+//
+// ReceiverController::roundFrequency with tuningFloorZeros (wfview default niceTS)
+//
+
+uint64_t rig_round_frequency(uint64_t freq, int steps, uint32_t step_hz)
+{
+	uint64_t delta;
+	uint64_t rem;
+	uint64_t floored;
+
+	if (step_hz < 1)
+		step_hz = 1;
+
+	delta = (uint64_t)(steps < 0 ? -(int64_t)steps : steps) * step_hz;
+	rem = freq % step_hz;
+	floored = freq - rem;
+
+	if (steps > 0)
+		return floored + delta;
+
+	if (steps < 0) {
+		const uint64_t down = rem ? delta - step_hz : delta;
+
+		return floored - (down < floored ? down : floored);
+	}
+
+	return floored;
+}
+
+//
+// Relative tuning from the current frequency; refused when it is unknown or 0
+//
+
+int rig_tune(struct rig *r, uint8_t vfo, int steps, uint32_t step_hz)
+{
+	if (vfo > 1)
+		return RIG_ERR_RANGE;
+	if (!r->st.rx[0].freq_valid[vfo] || r->st.rx[0].freq_hz[vfo] == 0)
+		return RIG_ERR_RANGE;
+
+	return rig_set_freq(r, vfo, rig_round_frequency(r->st.rx[0].freq_hz[vfo], steps, step_hz));
+}
+
+//
+// Set mode by rig file mode number; data and filter as wfview modeInfo:
+// bcd(reg) [data for Selected/Unselected Mode] [filter if the rig has filters]
+//
+
+int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter)
+{
+	uint8_t val[3];
+	uint8_t n = 0;
+	int reg = -1;
+	bool wfm = false;
+	int cmd;
+	size_t i;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (vfo > 1)
+		return RIG_ERR_RANGE;
+
+	for (i = 0; i < r->def.n_modes; i++) {
+		if (r->def.modes[i].num == mode_num) {
+			reg = r->def.modes[i].reg;
+			wfm = strcmp(r->def.modes[i].name, "WFM") == 0;
+		}
+	}
+	if (reg < 0)
+		return RIG_ERR_RANGE;
+
+	cmd = mode_cmd(r, vfo);
+	val[n++] = bcd_encode_char(reg);
+	if (cmd >= 0 && (r->kind[cmd] == K_MODE || r->kind[cmd] == K_MODE_UNSEL))
+		val[n++] = (uint8_t)data;
+	if (r->def.n_filters > 0 && !wfm)
+		val[n++] = (uint8_t)filter;
+
+	return queue_set(r, cmd, 0, val, n, false, 0);
+}
+
+//
+// Generic set by rig file command name, encoded per kind
+//
+
+int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
+{
+	const int cmd = rig_cmd_index(r, type);
+	uint8_t val[8];
+	uint8_t n = 0;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (cmd < 0)
+		return RIG_ERR_UNSUPPORTED;
+
+	switch (r->kind[cmd]) {
+	case K_BCD1:
+	case K_SCOPE_MODE:
+	case K_SCOPE_SPEED:
+	case K_SCOPE_EDGE:
+		// uchar: bcdEncodeChar
+		if (value < 0 || value > 99)
+			return RIG_ERR_RANGE;
+		val[n++] = bcd_encode_char(value);
+		break;
+	case K_BCD2:
+		// ushort: bcdEncodeInt
+		n = bcd_encode_int(value, val);
+		if (n == 0)
+			return RIG_ERR_RANGE;
+		break;
+	case K_BOOL:
+	case K_SCOPE_HOLD:
+		val[n++] = value != 0;
+		break;
+	case K_RAW1:
+		val[n++] = (uint8_t)value;
+		break;
+	default:
+		return RIG_ERR_UNSUPPORTED;
+	}
+
+	return queue_set(r, cmd, receiver, val, n, true, value);
+}
+
+//
+// Scope span: half span in Hz, must be one of the rig file spans
+//
+
+int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz)
+{
+	const int cmd = rig_cmd_index(r, "Scope Span");
+	uint8_t val[8];
+	uint8_t n;
+	bool known = false;
+	size_t i;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	for (i = 0; i < r->def.n_spans; i++) {
+		if (r->def.spans[i].freq == half_span_hz)
+			known = true;
+	}
+	if (!known)
+		return RIG_ERR_RANGE;
+
+	n = freq_payload(half_span_hz, val);
+	return queue_set(r, cmd, receiver, val, n, false, 0);
+}
+
+//
+// One-off read of a command
+//
+
+int rig_get(struct rig *r, const char *type, uint8_t receiver)
+{
+	struct rig_item it;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+
+	it.cmd = rig_cmd_index(r, type);
+	if (it.cmd < 0)
+		return RIG_ERR_UNSUPPORTED;
+	it.receiver = receiver;
+	it.recurring = false;
+	it.has_value = false;
+	it.value = 0;
+	it.range_check = false;
+	it.vlen = 0;
+	rig_queue_add(r, RIG_PRIO_IMMEDIATE, &it, true);
+	return 0;
 }

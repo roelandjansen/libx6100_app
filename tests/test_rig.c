@@ -355,6 +355,103 @@ static void test_unknown_model(void)
 	CHECK(strcmp(G.err, "unknown model 0x55: no rig file") == 0);
 }
 
+
+//
+// Phase 4: run the scheduler until the queue is idle, collecting frames
+//
+
+static void drain(int64_t *t)
+{
+	int i;
+
+	for (i = 0; i < 60; i++) {
+		*t += G_RIG.interval_ms;
+		rig_tick(&G_RIG, *t);
+	}
+}
+
+static int sent_bytes(const uint8_t *b, size_t n)
+{
+	return sent(b, n);
+}
+
+static void test_controls(void)
+{
+	static const uint8_t C_F7076[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
+	static const uint8_t C_F7074[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x40, 0x07, 0x07, 0x00, 0xfd };
+	static const uint8_t C_FGET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0xfd };
+	static const uint8_t C_USB[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x26, 0x00, 0x01, 0x00, 0x02, 0xfd };
+	static const uint8_t C_AGC2[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x16, 0x12, 0x02, 0xfd };
+	static const uint8_t C_RFG[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x14, 0x02, 0x01, 0x28, 0xfd };
+	static const uint8_t C_SPAN[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x27, 0x15, 0x00, 0x00, 0x40, 0x02, 0x00, 0x00, 0xfd };
+	static const uint8_t C_SMODE[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x27, 0x14, 0x00, 0x01, 0xfd };
+	static const uint8_t C_PRE[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x16, 0x02, 0x01, 0xfd };
+	static const uint8_t C_AGC_GET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x16, 0x12, 0xfd };
+	static const uint8_t C_SPAN_GET[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x27, 0x15, 0x00, 0xfd };
+	static const uint8_t C_ID_REPLY[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
+	int64_t t = 0;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	feed(C_ID_REPLY, sizeof(C_ID_REPLY));
+	CHECK(G_RIG.have_caps);
+
+	// Start-up reads for AGC and scope span (additions 5 and 6)
+	drain(&t);
+	CHECK(sent_bytes(C_AGC_GET, sizeof(C_AGC_GET)));
+	CHECK(sent_bytes(C_SPAN_GET, sizeof(C_SPAN_GET)));
+
+	// Three quick sets before a tick: only the last is sent (addUnique); model updated at once
+	G.n = 0;
+	CHECK(rig_set_freq(&G_RIG, 0, 7074000) == 0);
+	CHECK(rig_set_freq(&G_RIG, 0, 7075000) == 0);
+	CHECK(rig_set_freq(&G_RIG, 0, 7076000) == 0);
+	CHECK(G_RIG.st.rx[0].freq_hz[0] == 7076000);
+	drain(&t);
+	CHECK(sent_bytes(C_F7076, sizeof(C_F7076)));
+	CHECK(!sent_bytes(C_F7074, sizeof(C_F7074)));
+	CHECK(sent_bytes(C_FGET, sizeof(C_FGET)));
+
+	// Tuning with floor zeros (wfview niceTS default)
+	CHECK(rig_round_frequency(7076000, 3, 1000) == 7079000);
+	CHECK(rig_round_frequency(7076500, -1, 1000) == 7076000);
+	CHECK(rig_round_frequency(7076500, -2, 1000) == 7075000);
+	CHECK(rig_round_frequency(7076500, 1, 1000) == 7077000);
+	CHECK(rig_round_frequency(500, -3, 1000) == 0);
+	CHECK(rig_tune(&G_RIG, 0, -2, 1000) == 0);
+	CHECK(G_RIG.st.rx[0].freq_hz[0] == 7074000);
+
+	// Mode USB (num 1 -> reg 1), data 0, filter 2
+	G.n = 0;
+	CHECK(rig_set_mode(&G_RIG, 0, 1, 0, 2) == 0);
+	CHECK(rig_set_mode(&G_RIG, 0, 42, 0, 2) == RIG_ERR_RANGE);
+	drain(&t);
+	CHECK(sent_bytes(C_USB, sizeof(C_USB)));
+
+	// AGC (bcd uchar, range 1..3), RF gain (bcdEncodeInt), preamp
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "AGC Status", 0, 2) == 0);
+	CHECK(rig_set_value(&G_RIG, "AGC Status", 0, 5) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "RF Gain", 0, 128) == 0);
+	CHECK(rig_set_value(&G_RIG, "Preamp Status", 0, 1) == 0);
+	CHECK(rig_set_value(&G_RIG, "No Such Command", 0, 1) == RIG_ERR_UNSUPPORTED);
+	drain(&t);
+	CHECK(sent_bytes(C_AGC2, sizeof(C_AGC2)));
+	CHECK(sent_bytes(C_RFG, sizeof(C_RFG)));
+	CHECK(sent_bytes(C_PRE, sizeof(C_PRE)));
+	CHECK(sent_bytes(C_AGC_GET, sizeof(C_AGC_GET)));
+
+	// Scope: span from the rig file list only, mode fixed
+	G.n = 0;
+	CHECK(rig_set_span(&G_RIG, 0, 24000) == 0);
+	CHECK(rig_set_span(&G_RIG, 0, 7000) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Scope Mode", 0, 1) == 0);
+	drain(&t);
+	CHECK(sent_bytes(C_SPAN, sizeof(C_SPAN)));
+	CHECK(sent_bytes(C_SMODE, sizeof(C_SMODE)));
+	CHECK(sent_bytes(C_SPAN_GET, sizeof(C_SPAN_GET)));
+}
+
 int main(void)
 {
 	test_rigfile();
@@ -362,6 +459,7 @@ int main(void)
 	test_decode();
 	test_meter_cal();
 	test_scope();
+	test_controls();
 	test_unknown_model();
 
 	if (G_FAILS != 0) {

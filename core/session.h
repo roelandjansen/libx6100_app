@@ -110,6 +110,13 @@ struct session_info {
 	uint8_t rx_codec;
 	uint32_t retransmitted;
 	uint32_t requests_sent;
+
+	//
+	// Controls
+	//
+	uint32_t ctl_queued;
+	uint32_t ctl_rejected;
+	int ctl_last_error;
 };
 
 struct session_hooks {
@@ -163,3 +170,37 @@ void session_set_volume(struct session *s, uint8_t volume);
 
 void session_get_state(struct session *s, struct radio_state *out);
 bool session_get_scope_row(struct session *s, int receiver, struct radio_scope_row *out);
+
+//
+// Controls (any thread, non-blocking). Queued to the network thread; the
+// result shows up as a state change. Rejections there are counted in
+// session_info.ctl_rejected / ctl_last_error.
+//
+
+#define SESSION_ERR_LOCKED	(-10)
+#define SESSION_ERR_FULL	(-11)
+
+enum session_ctl_op {
+	SESSION_CTL_FREQ,
+	SESSION_CTL_TUNE,
+	SESSION_CTL_MODE,
+	SESSION_CTL_VALUE,
+	SESSION_CTL_SPAN,
+	SESSION_CTL_GET
+};
+
+int session_set_freq(struct session *s, uint8_t vfo, uint64_t hz);
+int session_tune(struct session *s, uint8_t vfo, int steps);
+int session_set_mode(struct session *s, uint8_t vfo, int mode_num, int data, int filter);
+int session_set_value(struct session *s, const char *type, uint8_t receiver, int value);
+int session_set_span(struct session *s, uint8_t receiver, uint32_t half_span_hz);
+int session_get_value(struct session *s, const char *type, uint8_t receiver);
+
+//
+// Client-side settings (any thread)
+//
+
+void session_set_step(struct session *s, uint32_t hz);
+uint32_t session_get_step(struct session *s);
+void session_set_freq_lock(struct session *s, bool locked);
+bool session_get_freq_lock(struct session *s);
