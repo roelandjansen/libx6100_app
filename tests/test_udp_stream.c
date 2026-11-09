@@ -145,13 +145,13 @@ static void test_control_timers(void)
 	CHECK(G_S.t_ping == 1100);
 	CHECK(G_S.t_idle == 700);
 
-	// Idle is tracked: seq 0, then 1
+	// Idle is tracked: seq 1 first (sendSeq = 1 as wfview), then 2
 	G_CAP.n = 0;
 	udp_stream_tick(&G_S, 700);
 	CHECK(G_CAP.n == 1);
 	CHECK(out_type(0) == PROTO_TYPE_IDLE);
-	CHECK(out_seq(0) == 0);
-	CHECK(G_S.tx_seq == 1);
+	CHECK(out_seq(0) == 1);
+	CHECK(G_S.tx_seq == 2);
 	CHECK(G_S.t_idle == 800);
 
 	// A tracked send pushes the idle timer out
@@ -161,7 +161,7 @@ static void test_control_timers(void)
 		make_control(d, PROTO_TYPE_IDLE, 0, 0);
 		udp_stream_send_tracked(&G_S, d, sizeof(d), 750);
 		CHECK(G_S.t_idle == 850);
-		CHECK(proto_get_le16(d + PROTO_OFF_SEQ) == 1);
+		CHECK(proto_get_le16(d + PROTO_OFF_SEQ) == 2);
 	}
 }
 
@@ -174,7 +174,7 @@ static void test_tx_retransmit(void)
 	memset(&G_CAP, 0, sizeof(G_CAP));
 	udp_stream_init(&G_S, UDP_STREAM_AUDIO, &C_IO, 1, 0);
 
-	// Send three tracked packets, seq 0..2
+	// Send three tracked packets, seq 1..3
 	for (i = 0; i < 3; i++) {
 		memset(d, 0, sizeof(d));
 		proto_put_le32(d + PROTO_OFF_LEN, sizeof(d));
@@ -182,20 +182,20 @@ static void test_tx_retransmit(void)
 		udp_stream_send_tracked(&G_S, d, sizeof(d), 10);
 	}
 
-	// Single request for seq 1: resend identical bytes
+	// Single request for seq 2: resend identical bytes
 	G_CAP.n = 0;
-	make_control(p, PROTO_TYPE_RETRANSMIT, 1, 9);
+	make_control(p, PROTO_TYPE_RETRANSMIT, 2, 9);
 	udp_stream_receive(&G_S, p, PROTO_CONTROL_SIZE, 20);
 	CHECK(G_CAP.n == 1);
 	CHECK(G_CAP.len[0] == sizeof(d));
 	CHECK(G_CAP.buf[0][0x1f] == 0xa1);
-	CHECK(out_seq(0) == 1);
+	CHECK(out_seq(0) == 2);
 
-	// Multi request for seq 2 (held) and 7 (not held): resend 2, idle with seq 7
+	// Multi request for seq 3 (held) and 7 (not held): resend 3, idle with seq 7
 	G_CAP.n = 0;
 	make_control(p, PROTO_TYPE_RETRANSMIT, 0, 9);
 	proto_put_le32(p + PROTO_OFF_LEN, PROTO_CONTROL_SIZE + 4);
-	proto_put_le16(p + 0x10, 2);
+	proto_put_le16(p + 0x10, 3);
 	proto_put_le16(p + 0x12, 7);
 	udp_stream_receive(&G_S, p, PROTO_CONTROL_SIZE + 4, 30);
 	CHECK(G_CAP.n == 2);
@@ -214,23 +214,23 @@ static void test_txbuf_limit(void)
 	memset(&G_CAP, 0, sizeof(G_CAP));
 	udp_stream_init(&G_S, UDP_STREAM_AUDIO, &C_IO, 1, 0);
 
-	// 600 packets: buffer keeps the last 501 (seq 99..599)
+	// 600 packets, seq 1..600: buffer keeps the last 501 (seq 100..600)
 	for (i = 0; i < 600; i++) {
 		make_control(d, PROTO_TYPE_IDLE, 0, 0);
 		udp_stream_send_tracked(&G_S, d, sizeof(d), 0);
 	}
 	CHECK(G_S.tx_count == PROTO_BUFSIZE + 1);
-	CHECK(G_S.tx_first == 99);
+	CHECK(G_S.tx_first == 100);
 
 	G_CAP.n = 0;
-	make_control(p, PROTO_TYPE_RETRANSMIT, 98, 9);
+	make_control(p, PROTO_TYPE_RETRANSMIT, 99, 9);
 	udp_stream_receive(&G_S, p, sizeof(p), 0);
 	CHECK(G_CAP.n == 0);
 
-	make_control(p, PROTO_TYPE_RETRANSMIT, 99, 9);
+	make_control(p, PROTO_TYPE_RETRANSMIT, 100, 9);
 	udp_stream_receive(&G_S, p, sizeof(p), 0);
 	CHECK(G_CAP.n == 1);
-	CHECK(out_seq(0) == 99);
+	CHECK(out_seq(0) == 100);
 }
 
 static void test_rx_missing(void)

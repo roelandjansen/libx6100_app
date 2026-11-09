@@ -338,6 +338,9 @@ void udp_stream_init(struct udp_stream *s, enum udp_stream_kind kind, const stru
 	s->kind = kind;
 	s->io = *io;
 	s->my_id = my_id;
+	// sendSeq = 1 as wfview icomudpbase.h: a real radio reads a first
+	// tracked packet with seq 0 as a wrap and asks for 0xff81..0xffff
+	s->tx_seq = 1;
 	s->rx_empty = true;
 	ping_delay_reset(&s->ping_delay);
 
