@@ -18,7 +18,11 @@ OBJDIR := $(BUILD)/obj
 
 include mk/third_party.mk
 
-SRC_COMMON := $(wildcard core/*.c) $(wildcard model/*.c) $(wildcard ui/*.c) $(SRC_THIRD_PARTY)
+SRC_COMMON := $(wildcard core/*.c) $(wildcard model/*.c) $(SRC_THIRD_PARTY)
+
+# Operating screen: own code plus LVGL, linked into the platform programs only
+SRC_UI := $(wildcard ui/*.c) $(SRC_LVGL)
+C_UI_FLAGS := -DLV_CONF_INCLUDE_SIMPLE -isystem third_party/lvgl -Iui
 
 # Objects for a list of sources: build/<target>/obj/<path>.o
 objs = $(patsubst %.c,$(OBJDIR)/%.o,$(1))
@@ -26,3 +30,7 @@ objs = $(patsubst %.c,$(OBJDIR)/%.o,$(1))
 $(OBJDIR)/%.o: %.c
 	@mkdir -p -- $(dir $@)
 	$(CC) $(CFLAGS_COMMON) $(CFLAGS_TARGET) -c -o $@ $<
+
+$(OBJDIR)/ui/%.o: ui/%.c
+	@mkdir -p -- $(dir $@)
+	$(CC) $(CFLAGS_COMMON) $(C_UI_FLAGS) $(CFLAGS_TARGET) -c -o $@ $<

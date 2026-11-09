@@ -50,3 +50,19 @@ test: $(TEST_BINS)
 
 apk:
 	$(error apk is only available for TARGET=android-arm64)
+
+#
+# Host preview of the operating screen (made-up data, writes a PPM)
+#
+
+C_PREVIEW := $(BUILD)/ui-preview
+DEPS += $(patsubst %.o,%.d,$(call objs,tools/ui_preview.c $(SRC_UI)))
+
+$(OBJDIR)/tools/ui_preview.o: tools/ui_preview.c
+	@mkdir -p -- $(dir $@)
+	$(CC) $(CFLAGS_COMMON) $(C_UI_FLAGS) $(CFLAGS_TARGET) -c -o $@ $<
+
+$(C_PREVIEW): $(call objs,tools/ui_preview.c $(SRC_UI) $(SRC_COMMON))
+	$(CC) $(LDFLAGS_TARGET) -o $@ $^ -lm -lpthread
+
+preview: $(C_PREVIEW)

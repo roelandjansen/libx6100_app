@@ -30,7 +30,7 @@ endif
 include mk/common.mk
 include mk/target-$(TARGET).mk
 
-.PHONY: all clean test apk
+.PHONY: all clean test apk preview
 
 # keep object files of test programs (otherwise removed as intermediates)
 .SECONDARY:

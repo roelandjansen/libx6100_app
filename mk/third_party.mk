@@ -5,6 +5,8 @@
 #
 #	third_party/opus   libopus 1.5.2, BSD (see third_party/opus/COPYING), float build, no DNN
 #	third_party/adpcm  adpcm-xq (as in wfview src/audio/adpcm), BSD (see license.txt)
+#	third_party/lvgl   LVGL 9.2.2 (commit 7f07a12), MIT (see LICENCE.txt), src/ unmodified
+#	                   except src/libs/thorvg (C++, not used) left out
 #
 
 C_OPUS_DIR := third_party/opus
@@ -19,6 +21,8 @@ SRC_OPUS := $(addprefix $(C_OPUS_DIR)/,$(SILK_SOURCES) $(SILK_SOURCES_FLOAT) $(C
 SRC_ADPCM := third_party/adpcm/adpcm-lib.c third_party/adpcm/adpcm-dns.c
 
 SRC_THIRD_PARTY := $(SRC_OPUS) $(SRC_ADPCM)
+
+SRC_LVGL := $(shell find third_party/lvgl/src -name '*.c' | sort)
 
 C_OPUS_FLAGS := -DOPUS_BUILD -DUSE_ALLOCA -DHAVE_LRINTF -DHAVE_LRINT '-DPACKAGE_VERSION="1.5.2"' \
 	-I$(C_OPUS_DIR)/include -I$(C_OPUS_DIR)/celt -I$(C_OPUS_DIR)/silk -I$(C_OPUS_DIR)/silk/float
@@ -38,3 +42,7 @@ $(OBJDIR)/$(C_OPUS_DIR)/%.o: $(C_OPUS_DIR)/%.c
 $(OBJDIR)/third_party/adpcm/%.o: third_party/adpcm/%.c
 	@mkdir -p -- $(dir $@)
 	$(CC) $(CFLAGS_THIRD_PARTY) $(CFLAGS_TARGET_TP) -c -o $@ $<
+
+$(OBJDIR)/third_party/lvgl/%.o: third_party/lvgl/%.c
+	@mkdir -p -- $(dir $@)
+	$(CC) $(CFLAGS_THIRD_PARTY) -DLV_CONF_INCLUDE_SIMPLE -Iui -Ithird_party/lvgl $(CFLAGS_TARGET_TP) -c -o $@ $<

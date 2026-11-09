@@ -13,6 +13,8 @@
 #include "core/control.h"
 #include "model/radio_state.h"
 
+struct rig_def;
+
 #define SESSION_HOST_MAX	256
 
 struct profile {
@@ -260,3 +262,11 @@ void tx_set_ptt_timeout(struct session *s, int enabled, int seconds);
 
 void tx_capture_write(struct session *s, const float *in, size_t frames, int channels);
 void tx_capture_lost(struct session *s);
+
+//
+// Rig definition of the detected model (UI thread). Valid while
+// radio_state.rig_valid is set; the definition does not change until the
+// session ends.
+//
+
+const struct rig_def *session_rig_def(struct session *s);

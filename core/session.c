@@ -1220,3 +1220,13 @@ void tx_capture_lost(struct session *s)
 		// Queue full: the heartbeat guard (if set) or PTT timeout still applies
 	}
 }
+
+const struct rig_def *session_rig_def(struct session *s)
+{
+	bool valid;
+
+	pthread_mutex_lock(&s->lock);
+	valid = s->state.rig_valid;
+	pthread_mutex_unlock(&s->lock);
+	return valid ? &s->rig.def : NULL;
+}
