@@ -124,7 +124,7 @@ static void print_help(void)
 		"  u [n] | d [n]           tune VFO A up / down n steps\n"
 		"  step <hz>               tuning step\n"
 		"  mode <num> [filter]     rig file mode number (X6100: LSB 0 USB 1 AM 2 CW 3 FM 5 CW-R 6), filter 1-3\n"
-		"  agc <1-3>  pre <0|1>  att <n>  rfg <0-255>\n"
+		"  agc <1-3>  pre <0|1>  att <0|20>  rfg <0-255>\n"
 		"  span <hz>               half span, e.g. 24000\n"
 		"  smode <0-3>             scope mode (0 center, 1 fixed)\n"
 		"  set <value> <name...>   any rig file command by name\n"

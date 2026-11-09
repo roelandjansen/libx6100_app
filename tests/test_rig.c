@@ -435,6 +435,10 @@ static void test_controls(void)
 	CHECK(rig_set_value(&G_RIG, "RF Gain", 0, 128) == 0);
 	CHECK(rig_set_value(&G_RIG, "Preamp Status", 0, 1) == 0);
 	CHECK(rig_set_value(&G_RIG, "No Such Command", 0, 1) == RIG_ERR_UNSUPPORTED);
+	CHECK(rig_set_value(&G_RIG, "Attenuator Status", 0, 1) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Attenuator Status", 0, 20) == 0);
+	CHECK(rig_set_value(&G_RIG, "Attenuator Status", 0, 0) == 0);
+	CHECK(rig_set_value(&G_RIG, "Preamp Status", 0, 2) == RIG_ERR_RANGE);
 	drain(&t);
 	CHECK(sent_bytes(C_AGC2, sizeof(C_AGC2)));
 	CHECK(sent_bytes(C_RFG, sizeof(C_RFG)));

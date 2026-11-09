@@ -1233,6 +1233,33 @@ int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter)
 }
 
 //
+// Attenuator / preamp values must be one of the rig file entries (Num)
+//
+
+static bool value_listed(const struct rig *r, const char *type, int value)
+{
+	const struct rig_named *list = NULL;
+	size_t n = 0;
+	size_t i;
+
+	if (strcmp(type, "Attenuator Status") == 0) {
+		list = r->def.attenuators;
+		n = r->def.n_attenuators;
+	} else if (strcmp(type, "Preamp Status") == 0) {
+		list = r->def.preamps;
+		n = r->def.n_preamps;
+	}
+
+	if (list == NULL || n == 0)
+		return true;
+	for (i = 0; i < n; i++) {
+		if (list[i].num == value)
+			return true;
+	}
+	return false;
+}
+
+//
 // Generic set by rig file command name, encoded per kind
 //
 
@@ -1246,6 +1273,11 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 		return RIG_ERR_NO_CAPS;
 	if (cmd < 0)
 		return RIG_ERR_UNSUPPORTED;
+
+	// Attenuator and preamp take only the values the rig file lists
+	// (wfview offers them as a fixed choice; X6100: attenuator 0 or 20 dB)
+	if (!value_listed(r, type, value))
+		return RIG_ERR_RANGE;
 
 	switch (r->kind[cmd]) {
 	case K_BCD1:
