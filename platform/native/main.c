@@ -2,11 +2,12 @@
 //
 // Native (SDL) entry point.
 //
-// Phase 1 test mode:
+// Test mode:
 //	radio <host> <control-port> <username> <password> [client-name] [rx-codec] [rx-rate] [latency-ms]
-// connects, prints state changes and counters once a second, sends a
-// CI-V Transceiver ID query (FE FE 00 E1 19 00 FD) every 2 s once connected
-// and prints the first CI-V frames received. RX audio plays on the default
+// connects, prints state changes and counters once a second, plus
+// the decoded radio state (rig file from rigs/ in the current directory,
+// picked by the announced model), the scope as a text line and the first
+// CI-V frames. RX audio plays on the default
 // SDL device. Ctrl-C disconnects cleanly.
 //
 
@@ -22,7 +23,7 @@
 #include "core/session.h"
 #include "platform/native/audio_sdl.h"
 
-#define C_CIV_PRINT_MAX	20
+#define C_CIV_PRINT_MAX	5
 
 static volatile sig_atomic_t G_STOP;
 static atomic_int G_CIV_PRINTED;
@@ -61,12 +62,61 @@ static void on_civ(void *ctx, const uint8_t *civ, size_t len)
 }
 
 //
+// One line of decoded radio state plus a coarse text rendering of the scope row
+//
+
+static void print_radio(struct session *s)
+{
+	static const char C_SHADES[] = " .:-=+*#%@";
+	struct radio_state st;
+	struct radio_scope_row row;
+	char spark[65];
+	const struct radio_rx *rx;
+
+	session_get_state(s, &st);
+	if (!st.rig_valid) {
+		printf("  rig: waiting for Transceiver ID\n");
+		return;
+	}
+
+	rx = &st.rx[0];
+	printf("  %s (0x%02x)  A %.6f MHz %s %s  B %.6f MHz  S %d (%.1f)  agc %d  tx %d  decoded %u  unmatched %u  rows %u\n",
+			st.model, st.model_id,
+			rx->freq_valid[0] ? (double)rx->freq_hz[0] / 1e6 : 0.0,
+			rx->mode[0].valid ? rx->mode[0].name : "-",
+			rx->mode[0].valid ? rx->mode[0].filter_name : "-",
+			rx->freq_valid[1] ? (double)rx->freq_hz[1] / 1e6 : 0.0,
+			st.meter[RADIO_METER_S].valid ? st.meter[RADIO_METER_S].raw : -1,
+			st.meter[RADIO_METER_S].valid ? st.meter[RADIO_METER_S].cal : 0.0,
+			st.agc.valid ? st.agc.value : -1,
+			st.transmit.valid ? st.transmit.value : -1,
+			st.frames_decoded, st.frames_unmatched, st.scope_rows);
+
+	if (session_get_scope_row(s, 0, &row) && row.len > 0 && st.amp_max > 0) {
+		size_t i;
+
+		for (i = 0; i < 64; i++) {
+			const size_t a = i * row.len / 64;
+			const size_t b = (i + 1) * row.len / 64;
+			unsigned int mx = 0;
+			size_t k;
+
+			for (k = a; k < b; k++)
+				if (row.bins[k] > mx)
+					mx = row.bins[k];
+			spark[i] = C_SHADES[mx * 9u / (unsigned int)st.amp_max > 9u ? 9u : mx * 9u / (unsigned int)st.amp_max];
+		}
+		spark[64] = '\0';
+		printf("  scope %.3f-%.3f MHz |%s|\n", (double)row.low_hz / 1e6, (double)row.high_hz / 1e6, spark);
+	}
+}
+
+//
 // Connect test against a wfview server
 //
 
 static int run_test(int argc, char *argv[])
 {
-	static const uint8_t C_RIG_ID[] = { 0xfe, 0xfe, 0x00, 0xe1, 0x19, 0x00, 0xfd };
 	const struct session_hooks hooks = { NULL, on_civ, NULL, NULL, NULL, NULL };
 	struct profile p;
 	struct session *s = NULL;
@@ -74,7 +124,7 @@ static int run_test(int argc, char *argv[])
 	struct session_info now;
 	struct sigaction sa;
 	long port;
-	int tick = 0;
+
 	int rc = EXIT_SUCCESS;
 
 	memset(&p, 0, sizeof(p));
@@ -94,6 +144,7 @@ static int run_test(int argc, char *argv[])
 	p.tx_codec = 0x04;
 	p.tx_sample = 48000;
 	p.tx_latency = 150;
+	snprintf(p.rig_dir, sizeof(p.rig_dir), "%s", "rigs");
 
 	memset(&sa, 0, sizeof(sa));
 	sa.sa_handler = on_signal;
@@ -136,15 +187,13 @@ static int run_test(int argc, char *argv[])
 		}
 
 		if (now.state == SESSION_CONNECTED) {
-			if (tick % 2 == 0)
-				session_civ_send(s, C_RIG_ID, sizeof(C_RIG_ID));
 
 			printf("civ %u  audio %u  late %u (%d ms)  codec 0x%02x  buf %d ms  underruns %u  overrun %u  decode-err %u  peak %.2f  rexmit %u  req %u\n",
 					now.civ_frames, now.audio_packets, now.audio_dropped_late, now.audio_lateness_ms,
 					now.rx_codec, now.audio_latency_ms, now.audio_underruns, now.audio_overrun_frames,
 					now.audio_decode_errors, (double)now.audio_peak, now.retransmitted, now.requests_sent);
 			fflush(stdout);
-			tick++;
+			print_radio(s);
 		}
 
 		if (now.state == SESSION_FAILED || now.state == SESSION_LOST || now.state == SESSION_CLOSED) {

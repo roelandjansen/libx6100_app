@@ -26,6 +26,7 @@
 #include "core/audio_rx.h"
 #include "core/audio_stream.h"
 #include "core/civ_stream.h"
+#include "core/rig.h"
 #include "core/udp_socket.h"
 
 #define C_POLL_MAX_MS		500
@@ -63,6 +64,8 @@ struct session {
 	struct civ_stream civ;
 	struct audio_stream audio;
 	struct audio_rx *arx;
+	struct rig rig;
+	bool rig_active;
 	bool streams_open;
 
 	//
@@ -82,6 +85,8 @@ struct session {
 	// Snapshot (under lock)
 	//
 	struct session_info info;
+	struct radio_state state;
+	struct radio_scope_row rows[RADIO_MAX_RX];
 };
 
 const char *session_state_name(enum session_state st)
@@ -110,6 +115,7 @@ const char *session_reason_name(enum session_reason r)
 	case SESSION_REASON_CONN_FAILED:	return "connection failed";
 	case SESSION_REASON_IN_USE:		return "radio in use";
 	case SESSION_REASON_LINK_LOST:		return "link lost";
+	case SESSION_REASON_UNKNOWN_MODEL:	return "unknown model";
 	}
 
 	return "?";
@@ -210,9 +216,52 @@ static int ev_alloc_ports(void *ctx, uint16_t *civ_local, uint16_t *audio_local)
 	return 0;
 }
 
+//
+// Rig layer events (network thread)
+//
+
+static int rig_send(void *ctx, const uint8_t *civ, size_t len)
+{
+	struct session *s = ctx;
+
+	if (!s->streams_open)
+		return -1;
+	return civ_stream_send(&s->civ, civ, len, clock_mono_ms());
+}
+
+static void rig_changed(void *ctx, uint32_t groups)
+{
+	struct session *s = ctx;
+	int i;
+
+	pthread_mutex_lock(&s->lock);
+	s->state = s->rig.st;
+	if (groups & RADIO_CHG_SCOPE) {
+		for (i = 0; i < RADIO_MAX_RX; i++)
+			s->rows[i] = s->rig.row[i];
+	}
+	pthread_mutex_unlock(&s->lock);
+
+	if (s->hooks.notify != NULL)
+		s->hooks.notify(s->hooks.ctx);
+}
+
+static void rig_error(void *ctx, const char *msg)
+{
+	struct session *s = ctx;
+
+	// Hard error on an unknown model (deviation 3): no fallback rig file
+	snprintf(s->ctl.status, sizeof(s->ctl.status), "%s", msg);
+	set_state(s, SESSION_FAILED, SESSION_REASON_UNKNOWN_MODEL);
+	s->stop = 1;
+}
+
 static void on_civ_data(void *ctx, const uint8_t *civ, size_t len)
 {
 	struct session *s = ctx;
+
+	if (s->rig_active)
+		rig_input(&s->rig, civ, len, clock_mono_ms());
 
 	if (s->hooks.civ_data != NULL)
 		s->hooks.civ_data(s->hooks.ctx, civ, len);
@@ -277,6 +326,14 @@ static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 	}
 
 	s->streams_open = true;
+
+	// Rig layer: Transceiver ID broadcast first, rig file from the announced model
+	{
+		const struct rig_events rev = { rig_send, rig_changed, rig_error, s };
+
+		rig_init(&s->rig, s->prof.rig_dir, s->ctl.baudrate, s->prof.poll_ms, &rev, now);
+		s->rig_active = true;
+	}
 	set_state(s, SESSION_CONNECTED, SESSION_REASON_NONE);
 }
 
@@ -292,6 +349,7 @@ static void ev_close_streams(void *ctx)
 	civ_stream_close(&s->civ, now);
 	if (s->arx != NULL)
 		audio_rx_stop(s->arx);
+	s->rig_active = false;
 	s->streams_open = false;
 	update_info(s);
 }
@@ -446,6 +504,8 @@ static void *net_thread(void *arg)
 		if (s->streams_open) {
 			deadline = min_deadline(deadline, civ_stream_next_deadline(&s->civ));
 			deadline = min_deadline(deadline, audio_stream_next_deadline(&s->audio));
+			if (s->rig_active)
+				deadline = min_deadline(deadline, rig_next_deadline(&s->rig));
 		}
 		timeout = C_POLL_MAX_MS;
 		if (deadline != 0) {
@@ -493,6 +553,8 @@ static void *net_thread(void *arg)
 		if (s->streams_open) {
 			civ_stream_tick(&s->civ, now);
 			audio_stream_tick(&s->audio, now);
+			if (s->rig_active)
+				rig_tick(&s->rig, now);
 		}
 
 		if (s->heard && now - s->last_rx > C_LINK_LOSS_MS) {
@@ -635,4 +697,27 @@ void session_set_volume(struct session *s, uint8_t volume)
 {
 	if (s->arx != NULL)
 		audio_rx_set_volume(s->arx, volume);
+}
+
+void session_get_state(struct session *s, struct radio_state *out)
+{
+	pthread_mutex_lock(&s->lock);
+	*out = s->state;
+	pthread_mutex_unlock(&s->lock);
+}
+
+bool session_get_scope_row(struct session *s, int receiver, struct radio_scope_row *out)
+{
+	bool ok = false;
+
+	if (receiver < 0 || receiver >= RADIO_MAX_RX)
+		return false;
+
+	pthread_mutex_lock(&s->lock);
+	if (s->rows[receiver].valid) {
+		*out = s->rows[receiver];
+		ok = true;
+	}
+	pthread_mutex_unlock(&s->lock);
+	return ok;
 }

@@ -11,6 +11,7 @@
 #include <stdint.h>
 
 #include "core/control.h"
+#include "model/radio_state.h"
 
 #define SESSION_HOST_MAX	256
 
@@ -43,6 +44,12 @@ struct profile {
 	// Playback device rate (0 = no RX audio pipeline)
 	//
 	uint32_t dev_rate;
+
+	//
+	// Rig files directory and polling interval (0 = derive from baud rate, as wfview)
+	//
+	char rig_dir[256];
+	int poll_ms;
 };
 
 enum session_state {
@@ -63,7 +70,8 @@ enum session_reason {
 	SESSION_REASON_AUTH,
 	SESSION_REASON_CONN_FAILED,
 	SESSION_REASON_IN_USE,
-	SESSION_REASON_LINK_LOST
+	SESSION_REASON_LINK_LOST,
+	SESSION_REASON_UNKNOWN_MODEL
 };
 
 struct session_info {
@@ -148,3 +156,10 @@ int session_civ_send(struct session *s, const uint8_t *civ, size_t len);
 
 void session_audio_read(struct session *s, float *out, size_t frames);
 void session_set_volume(struct session *s, uint8_t volume);
+
+//
+// Radio state (any thread): consistent snapshots
+//
+
+void session_get_state(struct session *s, struct radio_state *out);
+bool session_get_scope_row(struct session *s, int receiver, struct radio_scope_row *out);

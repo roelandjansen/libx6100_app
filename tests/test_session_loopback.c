@@ -41,6 +41,7 @@ struct fake_server {
 	int got_login;
 	int got_request;
 	int reject_login;
+	int got_id_query;
 };
 
 static int srv_socket(uint16_t *port)
@@ -136,6 +137,17 @@ static void srv_handle_stream(struct fake_server *f, int i, const uint8_t *b, si
 		srv_send(f, i, p, PROTO_CONTROL_SIZE, 0);
 	} else if (i == 1 && len == PROTO_OPENCLOSE_SIZE && b[0x15] == 0x04) {
 		f->civ_open = 1;
+	} else if (i == 1 && len >= 0x15 + 7 && b[0x10] == 0xc1 && b[0x15 + 4] == 0x19 && b[0x15 + 5] == 0x00) {
+		// Transceiver ID query on CI-V: answer as an X6100
+		static const uint8_t C_ID[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
+		uint8_t q[0x15 + sizeof(C_ID)];
+
+		srv_hdr(q, sizeof(q), 0);
+		q[0x10] = 0xc1;
+		proto_put_le16(q + 0x11, sizeof(C_ID));
+		memcpy(q + 0x15, C_ID, sizeof(C_ID));
+		srv_send(f, 1, q, sizeof(q), 1);
+		f->got_id_query++;
 	}
 }
 
@@ -198,6 +210,7 @@ int main(void)
 	struct profile p;
 	struct session *s = NULL;
 	struct session_info info;
+	struct radio_state rs;
 	int64_t until;
 	int i;
 
@@ -217,16 +230,18 @@ int main(void)
 	p.rx_sample = 48000;
 	p.rx_latency = 150;
 	p.dev_rate = 48000;
+	snprintf(p.rig_dir, sizeof(p.rig_dir), "%s", "rigs");
 
 	CHECK(session_connect(&s, &p, NULL) == 0);
 
 	// Run the fake server for up to 3 s, sending data every 20 ms once open
-	until = clock_mono_ms() + 3000;
+	until = clock_mono_ms() + 5000;
 	while (clock_mono_ms() < until) {
 		srv_poll(&f, 20);
 		srv_send_data(&f);
 		session_get_info(s, &info);
-		if (info.state == SESSION_CONNECTED && info.civ_frames > 5 && info.audio_packets > 5)
+		session_get_state(s, &rs);
+		if (info.state == SESSION_CONNECTED && info.civ_frames > 5 && info.audio_packets > 5 && rs.rig_valid)
 			break;
 	}
 
@@ -240,6 +255,13 @@ int main(void)
 	CHECK(strcmp(info.connection, "WFVIEW") == 0);
 	CHECK(info.civ_frames > 5);
 	CHECK(info.audio_packets > 5);
+
+	// Rig layer: Transceiver ID answered, X6100.rig loaded from rigs/
+	session_get_state(s, &rs);
+	CHECK(f.got_id_query >= 1);
+	CHECK(rs.rig_valid);
+	CHECK(rs.model_id == 0x61);
+	CHECK(strcmp(rs.model, "X6100") == 0);
 
 	// RX pipeline: PCM16 0x4040 reaches the ring on both channels after the silence pre-fill
 	{
@@ -270,7 +292,7 @@ int main(void)
 	f.reject_login = 1;
 	f.got_login = 0;
 	CHECK(session_connect(&s, &p, NULL) == 0);
-	until = clock_mono_ms() + 3000;
+	until = clock_mono_ms() + 5000;
 	while (clock_mono_ms() < until) {
 		srv_poll(&f, 20);
 		session_get_info(s, &info);
