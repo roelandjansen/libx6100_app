@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: GPL-3.0-or-later -->
+<!--
+	Launcher icon: the analog meter of the operating screen (S scale white,
+	red above S9, white needle) over a strip of waterfall. 108 x 108
+	adaptive-icon viewport, artwork inside the 66 dp safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+	android:width="108dp"
+	android:height="108dp"
+	android:viewportWidth="108"
+	android:viewportHeight="108">
+
+	<!-- waterfall strip -->
+	<path android:fillColor="#0A1A6E" android:pathData="M27,78h54v9h-54z" />
+	<path android:fillColor="#1E6FD8" android:pathData="M33,78h3v9h-3z" />
+	<path android:fillColor="#22D3EE" android:pathData="M45,78h2v9h-2z" />
+	<path android:fillColor="#FDE047" android:pathData="M53,78h4v9h-4z" />
+	<path android:fillColor="#1E6FD8" android:pathData="M64,78h2v9h-2z" />
+	<path android:fillColor="#22D3EE" android:pathData="M73,78h3v9h-3z" />
+
+	<!-- S scale to S9, then +dB in red -->
+	<path android:strokeColor="#F0F0F0" android:strokeWidth="4" android:strokeLineCap="round"
+		android:pathData="M28,59 A30,30 0 0,1 61.76,45.02" />
+	<path android:strokeColor="#E02828" android:strokeWidth="6" android:strokeLineCap="round"
+		android:pathData="M61.76,45.02 A30,30 0 0,1 80,59" />
+
+	<!-- ticks -->
+	<path android:strokeColor="#F0F0F0" android:strokeWidth="2.5" android:strokeLineCap="round"
+		android:pathData="M30.67,50.67 L27.84,47.84 M42.71,42.99 L41.35,39.23 M56.88,41.13 L57.23,37.14" />
+
+	<!-- needle and pivot -->
+	<path android:strokeColor="#FFFFFF" android:strokeWidth="3" android:strokeLineCap="round"
+		android:pathData="M54,74 L68.37,43.19" />
+	<path android:fillColor="#FFFFFF"
+		android:pathData="M54,70.5 a3.5,3.5 0 1,1 0,7 a3.5,3.5 0 1,1 0,-7z" />
+</vector>
