@@ -15,9 +15,12 @@
 
 #include "core/rigfile.h"
 #include "ui/ui_chooser.h"
+#include "ui/ui_meter.h"
 #include "ui/ui_scope.h"
 
 #define C_DESIGN_W	480
+#define C_METER_W	340
+#define C_METER_H	200
 
 //
 // Colours (X6100 operating screen)
@@ -64,11 +67,8 @@ static struct {
 	//
 	// Meter
 	//
-	lv_obj_t *meter;
-	lv_obj_t *needle;
-	lv_obj_t *l_meter_main;
-	lv_obj_t *l_meter_sub;
-	int32_t needle_len;
+	struct ui_meter *vu;
+	struct ui_font_data font;
 
 	//
 	// Frequency and mode lines
@@ -540,72 +540,12 @@ static void build_status(lv_obj_t *scr)
 
 static void build_meter(lv_obj_t *scr)
 {
-	static const char *texts[] = { "1", "3", "5", "7", "9", "+20", "+40", "+60", NULL };
-	static lv_style_t red_main;
-	static lv_style_t red_ticks;
-	static lv_style_t red_text;
-	lv_obj_t *p = box(scr, U(150), C_BG);
-	lv_obj_t *face;
-	lv_scale_section_t *sec;
-	const int32_t sz = U(300);
+	const int32_t face_w = U(C_METER_W);
+	lv_obj_t *p = box(scr, U(C_METER_H), C_BG);
 
-	// Meter face as the X6100 analog meter: light panel, arc scale
-	face = lv_obj_create(p);
-	lv_obj_remove_style_all(face);
-	lv_obj_set_size(face, U(330), U(140));
-	lv_obj_align(face, LV_ALIGN_CENTER, 0, 0);
-	lv_obj_set_style_bg_color(face, lv_color_hex(0x1d2733), 0);
-	lv_obj_set_style_bg_opa(face, LV_OPA_COVER, 0);
-	lv_obj_set_style_radius(face, U(8), 0);
-	lv_obj_remove_flag(face, LV_OBJ_FLAG_SCROLLABLE);
-
-	G.meter = lv_scale_create(face);
-	lv_obj_set_size(G.meter, sz, sz);
-	lv_obj_align(G.meter, LV_ALIGN_TOP_MID, 0, U(42));
-	lv_scale_set_mode(G.meter, LV_SCALE_MODE_ROUND_OUTER);
-	lv_scale_set_range(G.meter, 0, 70);
-	lv_scale_set_total_tick_count(G.meter, 15);
-	lv_scale_set_major_tick_every(G.meter, 2);
-	lv_scale_set_angle_range(G.meter, 70);
-	lv_scale_set_rotation(G.meter, 235);
-	lv_scale_set_label_show(G.meter, true);
-	lv_scale_set_text_src(G.meter, texts);
-	lv_obj_set_style_text_font(G.meter, G.f_small, 0);
-	lv_obj_set_style_text_color(G.meter, lv_color_hex(C_TEXT), 0);
-	lv_obj_set_style_line_color(G.meter, lv_color_hex(C_TEXT), LV_PART_ITEMS);
-	lv_obj_set_style_line_color(G.meter, lv_color_hex(C_TEXT), LV_PART_INDICATOR);
-	lv_obj_set_style_length(G.meter, U(6), LV_PART_ITEMS);
-	lv_obj_set_style_length(G.meter, U(11), LV_PART_INDICATOR);
-	lv_obj_set_style_line_width(G.meter, U(2), LV_PART_INDICATOR);
-	lv_obj_set_style_line_width(G.meter, U(2), LV_PART_MAIN);
-	lv_obj_set_style_arc_color(G.meter, lv_color_hex(C_ACCENT), LV_PART_MAIN);
-	lv_obj_set_style_arc_width(G.meter, U(2), LV_PART_MAIN);
-
-	lv_style_init(&red_main);
-	lv_style_set_arc_color(&red_main, lv_color_hex(C_RED));
-	lv_style_set_arc_width(&red_main, U(3));
-	lv_style_init(&red_ticks);
-	lv_style_set_line_color(&red_ticks, lv_color_hex(C_RED));
-	lv_style_init(&red_text);
-	lv_style_set_text_color(&red_text, lv_color_hex(C_RED));
-	lv_style_set_line_color(&red_text, lv_color_hex(C_RED));
-	sec = lv_scale_add_section(G.meter);
-	lv_scale_section_set_range(sec, 40, 70);
-	lv_scale_section_set_style(sec, LV_PART_MAIN, &red_main);
-	lv_scale_section_set_style(sec, LV_PART_ITEMS, &red_ticks);
-	lv_scale_section_set_style(sec, LV_PART_INDICATOR, &red_text);
-
-	G.needle = lv_line_create(G.meter);
-	lv_obj_set_style_line_width(G.needle, U(3), 0);
-	lv_obj_set_style_line_color(G.needle, lv_color_hex(0xffffff), 0);
-	lv_obj_set_style_line_rounded(G.needle, true, 0);
-	G.needle_len = sz / 2 - U(4);
-	lv_scale_set_line_needle_value(G.meter, G.needle, G.needle_len, 0);
-
-	G.l_meter_main = label(face, G.f_med, C_TEXT, "");
-	lv_obj_align(G.l_meter_main, LV_ALIGN_BOTTOM_RIGHT, -U(10), -U(24));
-	G.l_meter_sub = label(face, G.f_small, C_DIM, "");
-	lv_obj_align(G.l_meter_sub, LV_ALIGN_BOTTOM_RIGHT, -U(10), -U(6));
+	G.vu = ui_meter_create(p, face_w, G.font.ttf, G.font.len);
+	if (G.vu != NULL)
+		lv_obj_align(ui_meter_obj(G.vu), LV_ALIGN_CENTER, 0, 0);
 }
 
 static void build_freq(lv_obj_t *scr)
@@ -690,6 +630,7 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 
 	memset(&G, 0, sizeof(G));
 	G.ops = *ops;
+	G.font = *font;
 	G.w = lv_display_get_horizontal_resolution(disp);
 	G.h = lv_display_get_vertical_resolution(disp);
 	G.scale = (float)G.w / (float)C_DESIGN_W;
@@ -717,7 +658,7 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 	build_freq(scr);
 
 	// Spectrum about a third of the scope area, waterfall the rest, above the bottom bar
-	fixed = U(30) + U(150) + U(76) + U(32) + U(28) + U(72);
+	fixed = U(30) + U(C_METER_H) + U(76) + U(32) + U(28) + U(72);
 	rest = G.h - inset_top - inset_bottom - fixed;
 	if (rest < U(200))
 		rest = U(200);
@@ -730,6 +671,8 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 
 void ui_destroy(void)
 {
+	ui_meter_destroy(G.vu);
+	G.vu = NULL;
 	ui_scope_destroy(&G.scope);
 	if (G.f_small != NULL)
 		lv_tiny_ttf_destroy(G.f_small);
@@ -743,57 +686,41 @@ void ui_destroy(void)
 }
 
 //
-// Meter: needle position on the 0..70 scale, S1..S9 at 0..40, +60 dB at 70
+// Meter: S in RX; Po and SWR in TX. Po full scale from the rig file's
+// highest Power reading, rounded to 10 / 100 / 200 W
 //
 
-static int32_t s_to_scale(double db_over_s9)
+static double power_full_scale(void)
 {
-	double v;
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	double top = 0.0;
+	size_t i;
 
-	if (db_over_s9 <= 0.0)
-		v = (9.0 + db_over_s9 / 6.0 - 1.0) * 5.0;
-	else
-		v = 40.0 + db_over_s9 * 30.0 / 60.0;
-	if (v < 0.0)
-		v = 0.0;
-	if (v > 70.0)
-		v = 70.0;
-	return (int32_t)lrint(v);
+	if (r != NULL)
+		for (i = 0; i < r->n_meters; i++)
+			if (strcmp(r->meters[i].meter, "Power") == 0 && r->meters[i].actual > top)
+				top = r->meters[i].actual;
+	if (top <= 15.0)
+		return 10.0;
+	if (top <= 150.0)
+		return 100.0;
+	return 200.0;
 }
 
 static void update_meter(void)
 {
-	const struct radio_meter_value *s = &G.st.meter[RADIO_METER_S];
 	const bool tx = G.st.transmit.valid && G.st.transmit.value != 0;
-	char a[32];
-	char b[64];
 
+	if (G.vu == NULL)
+		return;
 	if (tx) {
 		const struct radio_meter_value *po = &G.st.meter[RADIO_METER_POWER];
 		const struct radio_meter_value *swr = &G.st.meter[RADIO_METER_SWR];
-		const struct radio_meter_value *alc = &G.st.meter[RADIO_METER_ALC];
 
-		// Power on the same needle, full scale at the rig's top power reading
-		lv_scale_set_line_needle_value(G.meter, G.needle, G.needle_len,
-				po->valid ? (int32_t)lrint(po->raw * 70.0 / 255.0) : 0);
-		snprintf(a, sizeof(a), po->valid ? "PO %.1fW" : "PO", po->cal);
-		snprintf(b, sizeof(b), "SWR %.1f  ALC %.1f", swr->valid ? swr->cal : 0.0, alc->valid ? alc->cal : 0.0);
-	} else if (s->valid) {
-		const double db = s->cal;
-
-		lv_scale_set_line_needle_value(G.meter, G.needle, G.needle_len, s_to_scale(db));
-		if (db <= 0.0)
-			snprintf(a, sizeof(a), "S%d", (int)lrint(9.0 + db / 6.0));
-		else
-			snprintf(a, sizeof(a), "S9+%d", (int)lrint(db));
-		// S9 = -73 dBm (HF)
-		snprintf(b, sizeof(b), "%d dBm", (int)lrint(db - 73.0));
+		ui_meter_tx(G.vu, po->valid ? po->cal : 0.0, swr->valid ? swr->cal : 1.0, power_full_scale());
 	} else {
-		a[0] = '\0';
-		b[0] = '\0';
+		ui_meter_rx(G.vu, G.st.meter[RADIO_METER_S].valid, G.st.meter[RADIO_METER_S].cal);
 	}
-	lv_label_set_text(G.l_meter_main, a);
-	lv_label_set_text(G.l_meter_sub, b);
 }
 
 static void set_text_if(lv_obj_t *l, const char *txt)
