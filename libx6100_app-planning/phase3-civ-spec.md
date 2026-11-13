@@ -1,6 +1,6 @@
 # Phase 3: CI-V, meters and scope spec
 
-Status: draft for review, values filled in from wfview `v3-initial` and libx6100 `contrib/wfview/X6100.rig`
+Status: draft for review, values filled in from wfview `main` and libx6100 `contrib/wfview/X6100.rig`
 Scope: the CI-V stream, the rig-file-driven command table, polling, decoding of state, meters and scope data into the model. Read-only: phase 3 sets nothing on the rig except scope and data output enable.
 Out of scope: controls (phase 4), TX and PTT (phase 5), waterfall rendering (UI, follows the model).
 Depends on: phase 1 (CI-V session on the announced port, rig file loaded from the announced model), phase 2 threading.
@@ -283,4 +283,4 @@ Against a 7851 (stereo, dual scope), once available:
 
 ## 12. Open points
 
-None on values; all from wfview `v3-initial` and `X6100.rig`.
+None on values; all from wfview `main` and `X6100.rig`.

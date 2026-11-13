@@ -8,7 +8,7 @@ wfview `.rig` files, used unchanged. The client picks the file whose
 
 | Files | Source | Commit |
 |---|---|---|
-| all except `X6100.rig` | wfview, branch `v3-initial`, `rigs/` (https://github.com/wf-group/wfview) | `ae0e493` |
+| all except `X6100.rig` | wfview, branch `main`, `rigs/` (https://github.com/wf-group/wfview) | `ae0e493` |
 | `X6100.rig` | libx6100, `contrib/wfview/X6100.rig` (https://github.com/roelandjansen/libx6100) | `9b75edb` |
 
 Licence: GPL-3.0, as the projects they come from.

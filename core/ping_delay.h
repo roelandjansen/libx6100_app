@@ -2,7 +2,7 @@
 //
 // Excess network delay estimate from peer ping timestamps.
 //
-// Port of PingDelayTracker from wfview v3-initial include/pingdelaytracker.h,
+// Port of PingDelayTracker from wfview main include/pingdelaytracker.h,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

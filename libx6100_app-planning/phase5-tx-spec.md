@@ -1,10 +1,10 @@
 # Phase 5: TX spec
 
-Status: draft for review, values filled in from wfview `v3-initial`
+Status: draft for review, values filled in from wfview `main`
 Scope: PTT, TX audio from the phone microphone, ATU tune, TX safety.
 Depends on: phases 1–4.
 
-Reference: wfview `v3-initial`:
+Reference: wfview `main`:
 - `src/radio/icomudpaudio.cpp` (TX packets)
 - `src/radio/icomudphandler.cpp` (TX enable in the stream request)
 - `src/audio/audioconverter.cpp` (Opus encoder)
@@ -84,7 +84,7 @@ Preconditions in this client before PTT on: session CONNECTED, state valid, TX p
 
 The PTT timeout replaces the earlier 180 s proposal: wfview already has it, default 300 s.
 
-**Server side:** the wfview server (`icomserver.cpp`) deletes a client after 15 s of silence (`STALE_CONNECTION`), but does not send PTT off. `v3-initial` stays unchanged. When the app dies while keyed, nothing from the client or the server unkeys the rig. The protection is the rig's own TX time-out, the same as for any other TOT-equipped rig behind wfview.
+**Server side:** the wfview server (`icomserver.cpp`) deletes a client after 15 s of silence (`STALE_CONNECTION`), but does not send PTT off. `main` stays unchanged. When the app dies while keyed, nothing from the client or the server unkeys the rig. The protection is the rig's own TX time-out, the same as for any other TOT-equipped rig behind wfview.
 
 ---
 

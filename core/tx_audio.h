@@ -6,7 +6,7 @@
 // session network thread. The ring is lock-free single-producer /
 // single-consumer and keeps its storage for the session lifetime.
 //
-// Conversions and encoder settings as wfview v3-initial
+// Conversions and encoder settings as wfview main
 // src/audio/audioconverter.cpp (20 ms blocks, Opus 64 kbit/s VBR voice,
 // G.711 u-law, unsigned 8 bit, signed 16 bit, adpcm-xq),
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.

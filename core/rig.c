@@ -2,7 +2,7 @@
 //
 // Rig layer: model detection, rig file, command queue, CI-V parsing.
 //
-// Ports of wfview v3-initial src/cachingqueue.cpp, src/radio/icomcommander.cpp,
+// Ports of wfview main src/cachingqueue.cpp, src/radio/icomcommander.cpp,
 // src/rigcommander.cpp and src/MainController.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //

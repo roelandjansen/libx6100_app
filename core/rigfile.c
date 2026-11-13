@@ -2,7 +2,7 @@
 //
 // wfview .rig file reader (QSettings INI format).
 //
-// Format as written by wfview v3-initial (rig creator / QSettings):
+// Format as written by wfview main (rig creator / QSettings):
 //	[General] Version=2.10
 //	[Rig] scalar keys, and arrays as Name\size=n plus Name\<i>\<Key>=value (1-based)
 // QSettings escapes a backslash in a value as "\\"; command strings are

@@ -2,7 +2,7 @@
 //
 // Icom scope frame assembler: Scope Wave Data (27 00) sequences to rows.
 //
-// Port of IcomScopeFrameAssembler::parsePayload from wfview v3-initial
+// Port of IcomScopeFrameAssembler::parsePayload from wfview main
 // src/radio/icomscopeframeassembler.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //

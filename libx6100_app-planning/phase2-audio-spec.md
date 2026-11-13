@@ -1,11 +1,11 @@
 # Phase 2: RX audio spec
 
-Status: draft for review, values filled in from wfview `v3-initial`
+Status: draft for review, values filled in from wfview `main`
 Scope: receiving the audio stream, decoding, buffering, playback on Android (AAudio) and SDL (Tumbleweed).
 Out of scope: TX audio (phase 5), CI-V (phase 3).
 Depends on: phase 1 (audio stream on the port from the status packet; codec and sample rate requested in the stream request).
 
-Reference: wfview `v3-initial`:
+Reference: wfview `main`:
 - `src/radio/icomudpaudio.cpp`
 - `include/audioconverter.h`, `src/audio/audioconverter.cpp`
 - `src/audio/audiohandlerbase.cpp`, `src/audio/audiohandlerqtoutput.cpp`

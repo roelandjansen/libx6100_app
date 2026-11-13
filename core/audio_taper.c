@@ -2,7 +2,7 @@
 //
 // RX volume taper: volume index 0..255 to gain.
 //
-// Values from wfview v3-initial include/audiotaper.h,
+// Values from wfview main include/audiotaper.h,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

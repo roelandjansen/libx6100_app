@@ -3,7 +3,7 @@
 // Common logic of one RS-BA1 UDP stream (control, CI-V or audio):
 // are-you-there, ready, ping, idle, tracked send, retransmit.
 //
-// Port of icomUdpBase from wfview v3-initial src/radio/icomudpbase.cpp,
+// Port of icomUdpBase from wfview main src/radio/icomudpbase.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 // No sockets and no clock in here: the caller supplies a send function,

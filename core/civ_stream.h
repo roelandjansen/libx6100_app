@@ -2,7 +2,7 @@
 //
 // CI-V UDP stream: open/close, CI-V data in both directions, watchdog.
 //
-// Port of icomUdpCivData from wfview v3-initial src/radio/icomudpcivdata.cpp,
+// Port of icomUdpCivData from wfview main src/radio/icomudpcivdata.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

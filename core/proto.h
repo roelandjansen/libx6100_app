@@ -2,7 +2,7 @@
 //
 // Icom RS-BA1 / wfview UDP protocol constants and byte helpers.
 //
-// Values from wfview v3-initial include/packettypes.h,
+// Values from wfview main include/packettypes.h,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

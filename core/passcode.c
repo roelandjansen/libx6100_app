@@ -2,7 +2,7 @@
 //
 // Username / password encoding for the login and stream request packets.
 //
-// Port of passcode() from wfview v3-initial include/icomudpbase.h,
+// Port of passcode() from wfview main include/icomudpbase.h,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

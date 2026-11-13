@@ -2,7 +2,7 @@
 //
 // TX audio pipeline: capture ring, mic gain, mono, resample, encode.
 //
-// Conversions and encoder settings as wfview v3-initial
+// Conversions and encoder settings as wfview main
 // src/audio/audioconverter.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //

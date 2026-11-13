@@ -2,7 +2,7 @@
 //
 // RX audio pipeline: decode, volume, mono to L+R, resample, output buffer.
 //
-// Behaviour as wfview v3-initial audioconverter.cpp / audiohandlerqtoutput.cpp,
+// Behaviour as wfview main audioconverter.cpp / audiohandlerqtoutput.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

@@ -3,7 +3,7 @@
 // Audio UDP stream: RX and TX audio packets, late-packet drop, 30 s watchdog.
 // Decoding and playback are phase 2; this delivers the payload.
 //
-// Port of the stream part of icomUdpAudio from wfview v3-initial
+// Port of the stream part of icomUdpAudio from wfview main
 // src/radio/icomudpaudio.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //

@@ -27,7 +27,7 @@ Targets: `native` (SDL, Tumbleweed), `x6100` (ARMv7 hard-float, glibc), `android
 │       ├── java/            foreground service, permissions, profile editor
 │       ├── res/
 │       └── AndroidManifest.xml
-├── rigs/                    .rig files: wfview v3-initial unchanged, plus X6100.rig from libx6100 contrib/wfview
+├── rigs/                    .rig files: wfview main unchanged, plus X6100.rig from libx6100 contrib/wfview
 ├── third_party/
 │   ├── lvgl/                vendored source, MIT notice retained
 │   ├── opus/                vendored source, BSD notice retained

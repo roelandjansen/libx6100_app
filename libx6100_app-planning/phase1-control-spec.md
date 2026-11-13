@@ -1,10 +1,10 @@
 # Phase 1: control session spec
 
-Status: draft for review, values filled in from wfview `v3-initial`
+Status: draft for review, values filled in from wfview `main`
 Scope: connect, login, radio selection, stream request, keepalive, token handling, retransmit, disconnect; opening the CI-V and audio streams.
 Out of scope: CI-V content and rig file use (phase 3), audio content (phase 2).
 
-Reference: wfview `v3-initial` (github.com/wf-group/wfview), files:
+Reference: wfview `main` (github.com/wf-group/wfview), files:
 - `include/packettypes.h`
 - `include/icomudpbase.h`, `src/radio/icomudpbase.cpp`
 - `src/radio/icomudphandler.cpp`
@@ -415,7 +415,7 @@ const char *session_status_text(const struct session *s);
 
 ## 13. Deviations from wfview
 
-| # | Item | wfview v3-initial | This client |
+| # | Item | wfview main | This client |
 |---|---|---|---|
 | 1 | address family | IPv4, falls back to IPv6 | IPv4 only (your decision) |
 | 2 | link loss | no detection on the client; only CI-V 2 s and audio 30 s watchdogs | LOST when nothing has been received on any stream for `STALE_CONNECTION` (15 s), wfview's own server value. On LOST: PTT off locally, all streams torn down, reason shown. Required by the TX guards (phase 5) |
@@ -424,8 +424,8 @@ const char *session_status_text(const struct session *s);
 
 Findings that affect other phases:
 
-- **X6100 rig file:** not in `v3-initial` by design; it comes from libx6100 `contrib/` and is dropped into the rig file directory. Zero changes to `v3-initial`.
-- **The wfview server does not drop PTT when a client goes stale.** It deletes stale connections after 15 s (`icomserver.cpp`), with no PTT handling in that path. `v3-initial` stays unchanged, so phase 5 test 6 (app killed while keyed) relies on the rig's own TX time-out.
+- **X6100 rig file:** not in `main` by design; it comes from libx6100 `contrib/` and is dropped into the rig file directory. Zero changes to `main`.
+- **The wfview server does not drop PTT when a client goes stale.** It deletes stale connections after 15 s (`icomserver.cpp`), with no PTT handling in that path. `main` stays unchanged, so phase 5 test 6 (app killed while keyed) relies on the rig's own TX time-out.
 - **Server ping stale check is commented out** in `icomServer::sendPing`; the stale sweep runs elsewhere in the server.
 
 ---

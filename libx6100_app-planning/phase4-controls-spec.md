@@ -1,11 +1,11 @@
 # Phase 4: rudimentary controls spec
 
-Status: draft for review, values filled in from wfview `v3-initial`
+Status: draft for review, values filled in from wfview `main`
 Scope: setting receive-side rig state from the UI: frequency, step, mode, filter, VFO, AGC, preamp, attenuator, scope span and mode, lock. Nothing that keys the transmitter.
 Out of scope: PTT, TX audio, ATU tune, anything that transmits (phase 5).
 Depends on: phase 3 (command table, model, polling).
 
-Reference: wfview `v3-initial` `src/cachingqueue.cpp`, `src/MainController.cpp`, `src/ReceiverController.cpp`, and `X6100.rig`. Behaviour identical to wfview.
+Reference: wfview `main` `src/cachingqueue.cpp`, `src/MainController.cpp`, `src/ReceiverController.cpp`, and `X6100.rig`. Behaviour identical to wfview.
 
 ---
 

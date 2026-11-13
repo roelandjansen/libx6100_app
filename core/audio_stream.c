@@ -2,7 +2,7 @@
 //
 // Audio UDP stream: RX and TX audio packets, late-packet drop, 30 s watchdog.
 //
-// Port of the stream part of icomUdpAudio from wfview v3-initial
+// Port of the stream part of icomUdpAudio from wfview main
 // src/radio/icomudpaudio.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //

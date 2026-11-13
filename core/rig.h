@@ -4,7 +4,7 @@
 // queue with wfview's priority scheduler, CI-V frame parsing and decoding
 // into struct radio_state.
 //
-// Ports of wfview v3-initial src/cachingqueue.cpp (scheduler),
+// Ports of wfview main src/cachingqueue.cpp (scheduler),
 // src/radio/icomcommander.cpp (parseData / parseCommand / receiveCommand),
 // src/rigcommander.cpp (getMeterCal) and src/MainController.cpp
 // (initial queue), wfview is copyright 2017-2026 Elliott H. Liggett (W6EL)

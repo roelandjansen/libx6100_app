@@ -80,7 +80,7 @@ The native test mode:
 
 ## Deviations from wfview
 
-wfview v3-initial is the reference for protocol, timing and behaviour. Where this client differs, on purpose:
+wfview main is the reference for protocol, timing and behaviour. Where this client differs, on purpose:
 
 1. IPv4 only.
 2. Link loss after 15 s without any packet on any stream (wfview's own server value). PTT is released locally.
@@ -102,7 +102,7 @@ wfview v3-initial is the reference for protocol, timing and behaviour. Where thi
 
 ## References
 
-- [wfview](https://github.com/wf-group/wfview), branch v3-initial: protocol, timing and rig file format.
+- [wfview](https://github.com/wf-group/wfview), branch main: protocol, timing and rig file format.
 - [libx6100](https://github.com/roelandjansen/libx6100): X6100 support, `contrib/wfview/X6100.rig`, meter design (`tools/x6100_trx.c`).
 
 ## Licence

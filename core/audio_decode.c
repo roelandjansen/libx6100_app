@@ -2,7 +2,7 @@
 //
 // RX audio decoding: codec payload to interleaved float [-1, 1].
 //
-// Conversions as wfview v3-initial src/audio/audioconverter.cpp,
+// Conversions as wfview main src/audio/audioconverter.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 

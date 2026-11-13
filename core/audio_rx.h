@@ -7,7 +7,7 @@
 // single-consumer and keeps its storage for the session lifetime, so a
 // stream reconfiguration on the writer side never races the reader.
 //
-// Output buffer behaviour as wfview v3-initial src/audio/audiohandlerqtoutput.cpp:
+// Output buffer behaviour as wfview main src/audio/audiohandlerqtoutput.cpp:
 // target size = latency, half pre-filled with silence on start, refilled
 // with up to half on the first write after an underrun, late packets
 // (> 1.5 x latency since arrival) dropped,

@@ -2,7 +2,7 @@
 //
 // Control stream: login, token, radio capabilities, stream request, status.
 //
-// Port of icomUdpHandler from wfview v3-initial src/radio/icomudphandler.cpp,
+// Port of icomUdpHandler from wfview main src/radio/icomudphandler.cpp,
 // wfview is copyright 2017-2026 Elliott H. Liggett (W6EL) and Phil Taylor (M0VSE), GPLv3.
 //
 
