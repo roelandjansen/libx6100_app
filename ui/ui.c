@@ -477,8 +477,7 @@ static void on_lock(lv_event_t *e)
 //
 
 // After a press the tuner is asked every 0.5 s (atu_poll): for 1.5 s after in / out, and
-// after a tune until the rig no longer reports TUNING (at least 1.5 s, at most 30 s).
-// Otherwise only the rig file's poll would show it, seconds late (Medium on the 7851)
+// after a tune until the rig no longer reports TUNING (at least 1.5 s, at most 30 s)
 static void atu_watch(bool tune)
 {
 	const uint32_t t = lv_tick_get();
@@ -489,22 +488,27 @@ static void atu_watch(bool tune)
 	G.atu_tune = tune;
 }
 
+// Also without a press (the TUNER key on the rig, a tune started there; Icom does not
+// announce the tuner as it does the frequency): asked once a second, every 0.5 s while
+// the rig reports TUNING. One small CI-V query a second, next to the scope and audio
 static void atu_poll(void)
 {
 	const uint32_t t = lv_tick_get();
+	uint32_t every = 1000u;
 
-	if (G.atu_until == 0 || G.ops.get_value == NULL)
+	if (G.ops.get_value == NULL || !G.st.rig_valid)
 		return;
 
-	if ((uint32_t)(t - G.atu_from) >= 30000u || (int32_t)(t - G.atu_until) >= 0
-			|| (G.atu_tune && (uint32_t)(t - G.atu_from) >= 1500u && G.st.tuner.valid && G.st.tuner.value != 2)) {
+	if (G.atu_until != 0 && ((uint32_t)(t - G.atu_from) >= 30000u || (int32_t)(t - G.atu_until) >= 0
+			|| (G.atu_tune && (uint32_t)(t - G.atu_from) >= 1500u && G.st.tuner.valid && G.st.tuner.value != 2)))
 		G.atu_until = 0;
-		return;
-	}
+
+	if (G.atu_until != 0 || (G.st.tuner.valid && G.st.tuner.value == 2))
+		every = 500u;
 
 	if ((int32_t)(t - G.atu_next) >= 0) {
 		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
-		G.atu_next = t + 500u;
+		G.atu_next = t + every;
 	}
 }
 
