@@ -181,6 +181,20 @@ static void notify(struct session *s)
 		s->hooks.notify(s->hooks.ctx);
 }
 
+//
+// The IC-7850 and IC-7851 are one rig to us (one CI-V address, 0x8E, and one rig file,
+// IC-785x): named IC-785x, as the rig file does, so the name does not change from the
+// rig's own (at login) to the rig file's (once loaded). Other names as they come
+//
+
+static void radio_name_set(char *out, size_t n, const char *dev)
+{
+	if (strncmp(dev, "IC-7850", sizeof("IC-7850")) == 0 || strncmp(dev, "IC-7851", sizeof("IC-7851")) == 0)
+		snprintf(out, n, "%s", "IC-785x");
+	else
+		snprintf(out, n, "%.*s", (int)n - 1, dev);
+}
+
 static void update_info(struct session *s)
 {
 	struct session_info *i = &s->info;
@@ -188,7 +202,7 @@ static void update_info(struct session *s)
 	pthread_mutex_lock(&s->lock);
 	i->control_state = s->ctl.state;
 	snprintf(i->status, sizeof(i->status), "%s", s->ctl.status);
-	memcpy(i->radio_name, s->ctl.dev_name, sizeof(i->radio_name));
+	radio_name_set(i->radio_name, sizeof(i->radio_name), s->ctl.dev_name);
 	i->civ_addr = s->ctl.civ_id;
 	i->baudrate = s->ctl.baudrate;
 	memcpy(i->connection, s->ctl.connection, sizeof(i->connection));
