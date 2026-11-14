@@ -116,6 +116,12 @@ static struct {
 	bool have_row;
 	uint8_t volume;
 	bool ptt_held;
+
+	// The tuner asked often for a while after a press (ATU in / out, tune): atu_*
+	uint32_t atu_from;	/* lv_tick_get() of the press */
+	uint32_t atu_until;	/* asked until then (0 none) */
+	uint32_t atu_next;	/* next ask */
+	bool atu_tune;		/* a tune: ends early once the rig no longer reports TUNING */
 } G;
 
 static int32_t U(float v)
@@ -470,14 +476,45 @@ static void on_lock(lv_event_t *e)
 // back once, so the button follows at once also where the rig file does not poll it
 //
 
+// After a press the tuner is asked every 0.5 s (atu_poll): for 1.5 s after in / out, and
+// after a tune until the rig no longer reports TUNING (at least 1.5 s, at most 30 s).
+// Otherwise only the rig file's poll would show it, seconds late (Medium on the 7851)
+static void atu_watch(bool tune)
+{
+	const uint32_t t = lv_tick_get();
+
+	G.atu_from = t;
+	G.atu_until = t + (tune ? 30000u : 1500u);
+	G.atu_next = t;
+	G.atu_tune = tune;
+}
+
+static void atu_poll(void)
+{
+	const uint32_t t = lv_tick_get();
+
+	if (G.atu_until == 0 || G.ops.get_value == NULL)
+		return;
+
+	if ((uint32_t)(t - G.atu_from) >= 30000u || (int32_t)(t - G.atu_until) >= 0
+			|| (G.atu_tune && (uint32_t)(t - G.atu_from) >= 1500u && G.st.tuner.valid && G.st.tuner.value != 2)) {
+		G.atu_until = 0;
+		return;
+	}
+
+	if ((int32_t)(t - G.atu_next) >= 0) {
+		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
+		G.atu_next = t + 500u;
+	}
+}
+
 static void on_atu(lv_event_t *e)
 {
 	const bool on = G.st.tuner.valid && G.st.tuner.value != 0;
 
 	(void)e;
 	G.ops.set_value(G.ops.ctx, "Tuner/ATU Status", on ? 0 : 1);
-	if (G.ops.get_value != NULL)
-		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
+	atu_watch(false);
 }
 
 static void on_tune(lv_event_t *e)
@@ -486,8 +523,7 @@ static void on_tune(lv_event_t *e)
 	if (!G.info.tx_available)
 		return;
 	G.ops.atu_tune(G.ops.ctx);
-	if (G.ops.get_value != NULL)
-		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
+	atu_watch(true);
 }
 
 //
@@ -900,6 +936,7 @@ void ui_poll(void)
 				G.st.filter_width.valid ? G.st.filter_width.value : 0);
 	}
 
+	atu_poll();
 	update_lines();
 	update_meter();
 	update_overlay();
