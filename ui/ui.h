@@ -44,6 +44,7 @@ struct ui_ops {
 	int (*tune)(void *ctx, int steps);
 	int (*set_mode)(void *ctx, int mode_num, int data, int filter);
 	int (*set_value)(void *ctx, const char *type, int value);
+	int (*get_value)(void *ctx, const char *type);	/* ask the rig once; the answer lands in the state */
 	int (*set_span)(void *ctx, uint32_t half_span_hz);
 	void (*set_step)(void *ctx, uint32_t hz);
 	uint32_t (*get_step)(void *ctx);

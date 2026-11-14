@@ -133,6 +133,7 @@ static void print_help(void)
 		"  ptt <0|1>               PTT off / on (toggle, no heartbeat)\n"
 		"  tx <seconds>            PTT on, released after the given time\n"
 		"  tune                    ATU tune cycle (transmits)\n"
+		"  atu on|off              ATU in / out (no transmission)\n"
 		"  mic <percent>           mic gain, 100 = unity\n"
 		"  tot <0|30-999>          PTT timeout off / seconds (default 300)\n"
 		"  help\n");
@@ -228,6 +229,17 @@ static void handle_command(struct session *s, char *line)
 		report(cmd, n);
 	} else if (strcmp(cmd, "tune") == 0) {
 		report(cmd, tx_tune(s));
+	} else if (strcmp(cmd, "atu") == 0) {
+		// The rig's tuner in / out (Tuner/ATU Status 1 / 0; no transmission), then read
+		// back so the state follows
+		int on = strcmp(rest, "on") == 0 ? 1 : strcmp(rest, "off") == 0 ? 0 : -1;
+
+		if (on < 0) {
+			printf("atu on|off\n");
+		} else {
+			report(cmd, session_set_value(s, "Tuner/ATU Status", 0, on));
+			session_get_value(s, "Tuner/ATU Status", 0);
+		}
 	} else if (strcmp(cmd, "mic") == 0) {
 		tx_set_mic_gain(s, (int)strtol(rest, NULL, 10));
 		printf("mic gain: %ld%%\n", strtol(rest, NULL, 10));

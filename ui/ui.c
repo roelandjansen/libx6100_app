@@ -94,6 +94,7 @@ static struct {
 	lv_obj_t *b_lock;
 	lv_obj_t *l_lock;
 	lv_obj_t *b_tune;
+	lv_obj_t *l_tune;
 	lv_obj_t *b_vol;
 	lv_obj_t *l_vol;
 	lv_obj_t *b_ptt;
@@ -463,10 +464,30 @@ static void on_lock(lv_event_t *e)
 	G.ops.set_lock(G.ops.ctx, !G.ops.get_lock(G.ops.ctx));
 }
 
+//
+// ATU button: short press the tuner in / out (Tuner/ATU Status 1 / 0, no transmission),
+// long press a tune cycle (transmits: only with TX available). Each asks the tuner state
+// back once, so the button follows at once also where the rig file does not poll it
+//
+
+static void on_atu(lv_event_t *e)
+{
+	const bool on = G.st.tuner.valid && G.st.tuner.value != 0;
+
+	(void)e;
+	G.ops.set_value(G.ops.ctx, "Tuner/ATU Status", on ? 0 : 1);
+	if (G.ops.get_value != NULL)
+		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
+}
+
 static void on_tune(lv_event_t *e)
 {
 	(void)e;
+	if (!G.info.tx_available)
+		return;
 	G.ops.atu_tune(G.ops.ctx);
+	if (G.ops.get_value != NULL)
+		G.ops.get_value(G.ops.ctx, "Tuner/ATU Status");
 }
 
 //
@@ -595,7 +616,8 @@ static void build_bottom(lv_obj_t *scr)
 	lv_obj_set_style_bg_color(r, lv_color_hex(C_PANEL), 0);
 	G.b_lock = button(r, U(84), U(52), "LOCK", 0x263241, &G.l_lock);
 	lv_obj_add_event_cb(G.b_lock, on_lock, LV_EVENT_CLICKED, NULL);
-	G.b_tune = button(r, U(84), U(52), "TUNE", 0x263241, NULL);
+	G.b_tune = button(r, U(84), U(52), "ATU", 0x263241, &G.l_tune);
+	lv_obj_add_event_cb(G.b_tune, on_atu, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(G.b_tune, on_tune, LV_EVENT_LONG_PRESSED, NULL);
 	G.b_vol = button(r, U(96), U(52), "VOL", 0x263241, &G.l_vol);
 	lv_obj_add_event_cb(G.b_vol, on_vol, LV_EVENT_CLICKED, NULL);
@@ -810,12 +832,19 @@ static void update_lines(void)
 	lv_obj_set_style_bg_color(G.b_lock, lv_color_hex(lock ? 0x8d6e1f : 0x263241), 0);
 	snprintf(buf, sizeof(buf), "VOL %d", G.volume * 100 / 255);
 	set_text_if(G.l_vol, buf);
-	if (!G.info.tx_available) {
+	// PTT needs TX; the ATU button stays usable (in / out sends nothing on the air; its
+	// tune checks TX itself)
+	if (!G.info.tx_available)
 		lv_obj_add_state(G.b_ptt, LV_STATE_DISABLED);
-		lv_obj_add_state(G.b_tune, LV_STATE_DISABLED);
-	} else {
+	else
 		lv_obj_remove_state(G.b_ptt, LV_STATE_DISABLED);
-		lv_obj_remove_state(G.b_tune, LV_STATE_DISABLED);
+
+	// The rig's tuner: out (plain), in (green), tuning (amber, TUNING)
+	{
+		const int tu = G.st.tuner.valid ? G.st.tuner.value : 0;
+
+		lv_obj_set_style_bg_color(G.b_tune, lv_color_hex(tu == 2 ? 0x8d6e1f : tu == 1 ? 0x1f5d3a : 0x263241), 0);
+		set_text_if(G.l_tune, tu == 2 ? "TUNING" : "ATU");
 	}
 	lv_obj_set_style_bg_color(G.b_ptt, lv_color_hex(G.info.ptt ? C_RED : 0x3a2328), 0);
 	if (G.info.ptt && G.info.ptt_remaining_s > 0 && G.info.ptt_remaining_s <= 30)

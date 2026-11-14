@@ -145,6 +145,13 @@ static int op_set_value(void *ctx, const char *t, int v)
 	return 0;
 }
 
+static int op_get_value(void *ctx, const char *t)
+{
+	(void)ctx;
+	(void)t;
+	return 0;
+}
+
 static int op_set_span(void *ctx, uint32_t h)
 {
 	(void)ctx;
@@ -310,6 +317,7 @@ int main(int argc, char **argv)
 	ops.tune = op_tune;
 	ops.set_mode = op_set_mode;
 	ops.set_value = op_set_value;
+	ops.get_value = op_get_value;
 	ops.set_span = op_set_span;
 	ops.set_step = op_set_step;
 	ops.get_step = op_get_step;

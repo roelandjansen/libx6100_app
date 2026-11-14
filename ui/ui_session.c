@@ -90,6 +90,11 @@ static int op_atu_tune(void *ctx)
 	return tx_tune(ctx);
 }
 
+static int op_get_value(void *ctx, const char *type)
+{
+	return session_get_value(ctx, type, 0);
+}
+
 void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 {
 	ops->ctx = s;
@@ -101,6 +106,7 @@ void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 	ops->tune = op_tune;
 	ops->set_mode = op_set_mode;
 	ops->set_value = op_set_value;
+	ops->get_value = op_get_value;
 	ops->set_span = op_set_span;
 	ops->set_step = op_set_step;
 	ops->get_step = op_get_step;
