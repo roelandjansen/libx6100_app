@@ -23,7 +23,7 @@ Status: working on Android and the Linux desktop against an X6100 (wfserver) and
 - Multi-scale analog meter as in libx6100 `x6100_trx`: S / Po, SWR, COMP and ALC arcs, with the same needle ballistics (80 ms attack, 900 ms release) and peak hold.
 - Controls: frequency (keypad entry, checked against the rig file bands), tuning step, mode, filter, AGC, preamp, attenuator, scope span and mode, frequency lock, volume.
 - Only the controls the rig file defines are shown. AGC names follow the rig: Icom FAST / MID / SLOW, X6100 FAST / AUTO / SLOW.
-- TX: hold-to-talk PTT, the ATU button (short press: the rig's tuner in / out, green while in; long press: a tune cycle, amber TUNING while it runs; tuner in / out also without TX), PTT time-out (as wfview, 30–999 s). RX audio is muted on the phone while keyed.
+- TX: hold-to-talk PTT, the ATU button with the rig's tuner state (ATU ? not known yet, ATU OFF, ATU ON green, TUNING amber; short press: in / out, also without TX; long press: a tune cycle), PTT time-out (as wfview, 30–999 s). RX audio is muted on the phone while keyed.
 - PTT safety guards:
   - PTT is released on finger up, on a lost press, on app pause or loss of the window, on a lost microphone, on link loss, on disconnect, and on a missing UI heartbeat.
   - When the app disconnects while keyed, PTT off is sent straight to the rig.

@@ -839,12 +839,13 @@ static void update_lines(void)
 	else
 		lv_obj_remove_state(G.b_ptt, LV_STATE_DISABLED);
 
-	// The rig's tuner: out (plain), in (green), tuning (amber, TUNING)
+	// The rig's tuner: not known yet (ATU ?), out (ATU OFF, plain), in (ATU ON, green),
+	// tuning (TUNING, amber)
 	{
-		const int tu = G.st.tuner.valid ? G.st.tuner.value : 0;
+		const int tu = G.st.tuner.valid ? G.st.tuner.value : -1;
 
 		lv_obj_set_style_bg_color(G.b_tune, lv_color_hex(tu == 2 ? 0x8d6e1f : tu == 1 ? 0x1f5d3a : 0x263241), 0);
-		set_text_if(G.l_tune, tu == 2 ? "TUNING" : "ATU");
+		set_text_if(G.l_tune, tu == 2 ? "TUNING" : tu == 1 ? "ATU ON" : tu == 0 ? "ATU OFF" : "ATU ?");
 	}
 	lv_obj_set_style_bg_color(G.b_ptt, lv_color_hex(G.info.ptt ? C_RED : 0x3a2328), 0);
 	if (G.info.ptt && G.info.ptt_remaining_s > 0 && G.info.ptt_remaining_s <= 30)
