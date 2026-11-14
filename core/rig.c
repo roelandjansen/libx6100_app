@@ -313,6 +313,34 @@ static void slot_remove_equal(struct rig_queue_slot *s, const struct rig_item *i
 	}
 }
 
+//
+// queue->del(func, receiver) as wfview: the recurring entries of a command, from every
+// priority
+//
+
+static void queue_del(struct rig *r, int cmd, uint8_t receiver)
+{
+	size_t p;
+	size_t i;
+
+	if (cmd < 0)
+		return;
+
+	for (p = 0; p < RIG_PRIO_COUNT; p++) {
+		struct rig_queue_slot *s = &r->q[p];
+
+		i = 0;
+		while (i < s->n) {
+			if (s->items[i].recurring && s->items[i].cmd == cmd && s->items[i].receiver == receiver) {
+				memmove(&s->items[i], &s->items[i + 1], (s->n - i - 1) * sizeof(s->items[0]));
+				s->n--;
+			} else {
+				i++;
+			}
+		}
+	}
+}
+
 void rig_queue_add(struct rig *r, enum rig_prio prio, const struct rig_item *in, bool unique)
 {
 	struct rig_item it = *in;
@@ -515,6 +543,7 @@ static void have_rig_id(struct rig *r, int model)
 	set_interval(r);
 
 	queue_clear(r);
+	r->scope_seen = false;	/* Scope On/Off recurs until the first row (below) */
 
 	for (i = 0; i < r->def.n_periodic; i++) {
 		const struct rig_periodic *p = &r->def.periodic[i];
@@ -820,6 +849,16 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 			row->seq = ++r->row_seq;
 			row->time_ms = now_ms;
 			r->st.scope_rows++;
+
+			// The first scope row: the recurring Scope On/Off goes, as wfview does
+			// (receiverwidget: queue->del(funcScopeOnOff, 0) once scope data came).
+			// Sent on, it put the rig back on its scope screen several times a
+			// second: menus closed, the focus taken (IC-7851, IC-9700, IC-7760)
+			if (!r->scope_seen) {
+				r->scope_seen = true;
+				queue_del(r, rig_cmd_index(r, "Scope On/Off"), 0);
+			}
+
 			return RADIO_CHG_SCOPE;
 		}
 		return 0;

@@ -90,6 +90,7 @@ struct rig {
 	unsigned int counter;
 	int interval_ms;
 	int64_t t_next;
+	bool scope_seen;	// a scope row came since the rig file loaded: Scope On/Off no longer recurring
 
 	//
 	// Frame reassembly across CI-V packets

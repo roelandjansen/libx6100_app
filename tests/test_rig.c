@@ -295,6 +295,19 @@ static void scope_frame(const uint8_t *payload, size_t n)
 	feed(f, 8 + n);
 }
 
+// Recurring queue entries of a command, over all priorities
+static int recurring_count(const char *type)
+{
+	const int cmd = rig_cmd_index(&G_RIG, type);
+	int n = 0;
+
+	for (size_t p = 0; p < RIG_PRIO_COUNT; p++)
+		for (size_t i = 0; i < G_RIG.q[p].n; i++)
+			n += G_RIG.q[p].items[i].recurring && G_RIG.q[p].items[i].cmd == cmd;
+
+	return n;
+}
+
 static void test_scope(void)
 {
 	// seq 01/11, center mode, center 1.395 MHz, half span 24 kHz, in range
@@ -309,9 +322,14 @@ static void test_scope(void)
 	int k;
 	const struct radio_scope_row *row = &G_RIG.row[0];
 
+	// Scope On/Off recurs until the first row (wfview deletes it then: sent on, it
+	// put the rig back on its scope screen several times a second)
+	CHECK(recurring_count("Scope On/Off") == 1);
+
 	G.groups = 0;
 	scope_frame(C_HDR, sizeof(C_HDR));
 	CHECK(G_RIG.st.scope_rows == 0);
+	CHECK(recurring_count("Scope On/Off") == 1);
 
 	// Sequences 2..11: 9 x 50 + 25 = 475 bins (IC-705 layout)
 	for (s = 2; s <= 11; s++) {
@@ -325,6 +343,7 @@ static void test_scope(void)
 	}
 
 	CHECK(G_RIG.st.scope_rows == 1);
+	CHECK(recurring_count("Scope On/Off") == 0);	/* deleted with the first row */
 	CHECK((G.groups & RADIO_CHG_SCOPE) != 0);
 	CHECK(row->valid && !row->oor);
 	CHECK(row->len == 475);
