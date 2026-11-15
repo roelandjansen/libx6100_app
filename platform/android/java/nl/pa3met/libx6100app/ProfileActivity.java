@@ -162,6 +162,37 @@ public class ProfileActivity extends Activity {
 		return s;
 	}
 
+	//
+	// The password with an eye to its right (2026-11-15): dim while hidden, bright while
+	// shown; a tap switches. Always hidden when the page opens
+	//
+	private EditText passwordField(String label) {
+		final int hidden = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD;
+		final int shown = InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+		LinearLayout row = new LinearLayout(this);
+		EditText e = new EditText(this);
+		Button eye = new Button(this);
+
+		caption(label);
+		row.setOrientation(LinearLayout.HORIZONTAL);
+		e.setSingleLine(true);	/* before the input type: see field() */
+		e.setInputType(hidden);
+		row.addView(e, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+		eye.setText("👁");	/* the eye */
+		eye.setAlpha(0.4f);
+		eye.setOnClickListener(v -> {
+			boolean show = e.getInputType() == hidden;
+
+			e.setInputType(show ? shown : hidden);
+			e.setSelection(e.getText().length());
+			eye.setAlpha(show ? 1.0f : 0.4f);
+		});
+		row.addView(eye, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
+				ViewGroup.LayoutParams.WRAP_CONTENT, 0.0f));
+		form.addView(row);
+		return e;
+	}
+
 	private Button button(LinearLayout row, String text, View.OnClickListener l) {
 		Button b = new Button(this);
 
@@ -377,7 +408,7 @@ public class ProfileActivity extends Activity {
 		host = field("Server (host name or IPv4 address)", "", text | InputType.TYPE_TEXT_VARIATION_URI);
 		port = field("Control port", "", number);
 		user = field("Username", "", text);
-		pass = field("Password", "", text | InputType.TYPE_TEXT_VARIATION_PASSWORD);
+		pass = passwordField("Password");
 		name = field("Client name (max 8)", "", text);
 		rxCodec = choice("RX codec", RX_CODEC_NAMES, 3);
 		rxRate = choice("RX sample rate", RATE_NAMES, 0);
