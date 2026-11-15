@@ -56,6 +56,7 @@ struct audio_rx {
 	uint32_t rx_rate;
 	uint32_t r_quiet;		// frames the right channel has been silent
 	float fill;			// 0 left / right as received .. 1 left on both, ramped
+	atomic_int route;		// AUDIO_ROUTE_*: auto, or one receiver on both sides
 	float decoded[AUDIO_DECODE_MAX_FRAMES * 2];
 	float stereo[AUDIO_DECODE_MAX_FRAMES * 2];
 	float resampled[AUDIO_DECODE_MAX_FRAMES * 2 * 8];
@@ -102,3 +103,11 @@ void audio_rx_read(struct audio_rx *a, float *out, size_t frames);
 //
 
 void audio_rx_set_volume(struct audio_rx *a, uint8_t volume);
+
+// Two channels (Icom: main left, sub right; 2026-11-15): AUDIO_ROUTE_AUTO as received, a
+// silent right channel (single receiver) getting the left one; MAIN / SUB: that receiver
+// on both sides
+#define AUDIO_ROUTE_AUTO	0
+#define AUDIO_ROUTE_MAIN	1
+#define AUDIO_ROUTE_SUB		2
+void audio_rx_set_route(struct audio_rx *a, int route);

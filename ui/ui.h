@@ -68,6 +68,11 @@ struct ui_ops {
 	// TX test tone in place of the mic (1 kHz, -6 dBFS); NULL: not offered
 	//
 	void (*test_tone)(void *ctx, int on);
+
+	//
+	// Two-channel RX audio: AUDIO_ROUTE_* (auto, main or sub on both); NULL: not offered
+	//
+	void (*audio_route)(void *ctx, int route);
 };
 
 //

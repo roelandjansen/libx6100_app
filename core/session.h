@@ -207,6 +207,7 @@ int session_power(struct session *s, int on);
 
 void session_audio_read(struct session *s, float *out, size_t frames);
 void session_set_volume(struct session *s, uint8_t volume);
+void session_set_audio_route(struct session *s, int route);	/* AUDIO_ROUTE_*: two-channel RX */
 
 //
 // Radio state (any thread): consistent snapshots

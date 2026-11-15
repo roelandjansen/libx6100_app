@@ -137,6 +137,7 @@ struct radio_state {
 	struct radio_value attenuator;
 	struct radio_value tuning_step;
 	struct radio_value tuner;
+	struct radio_value dual_watch;	// VFO Dual Watch: 0 off, 1 on (two receivers)
 	struct radio_value split;
 	struct radio_value transmit;
 	struct radio_value noise_blanker;

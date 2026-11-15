@@ -42,6 +42,11 @@
 static const uint32_t C_STEPS[] = { 1, 10, 50, 100, 500, 1000, 2500, 5000, 9000, 10000, 12500, 25000, 100000 };
 #define C_N_STEPS	(sizeof(C_STEPS) / sizeof(C_STEPS[0]))
 
+// The rig-name menu lines
+enum { MENU_POWER_ON, MENU_POWER_OFF, MENU_TONE, MENU_AUDIO, MENU_N };
+
+#define C_SUB		0x80deea	/* the other receiver (dual watch) */
+
 static struct {
 	struct ui_ops ops;
 	float scale;
@@ -114,6 +119,15 @@ static struct {
 	double tx_hold_db;
 	uint32_t tx_hold_t;
 	bool tone_on;		/* TX test tone in place of the mic */
+
+	//
+	// Dual watch (2026-11-15, step 1): DW in the AGC row, the other receiver on a line
+	// over the top of the spectrum while it is on, the audio route from the menu
+	//
+	lv_obj_t *l_dw;
+	lv_obj_t *l_sub;
+	int route;		/* AUDIO_ROUTE_* */
+	int menu[MENU_N];	/* the rig-name menu as shown: MENU_* per line */
 
 	//
 	// Last snapshots
@@ -352,6 +366,16 @@ static void on_att(lv_event_t *e)
 		choose_named("Attenuator", "Attenuator Status", r->attenuators, r->n_attenuators, &G.st.attenuator);
 }
 
+// DW: dual watch on / off on the rig (VFO Dual Watch 1 / 0); the rig file polls it, the
+// set reads it back
+static void on_dw(lv_event_t *e)
+{
+	const bool on = G.st.dual_watch.valid && G.st.dual_watch.value != 0;
+
+	(void)e;
+	G.ops.set_value(G.ops.ctx, "VFO Dual Watch", on ? 0 : 1);
+}
+
 static void on_pre(lv_event_t *e)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
@@ -395,14 +419,39 @@ static void on_power_off_sure(int idx, void *ud)
 		G.ops.power(G.ops.ctx, 0);
 }
 
+// The audio route of a two-channel stream (main left, sub right): auto as received (a
+// single receiver on both sides), or one receiver on both
+static const char *const C_ROUTES[] = { "Auto: main left, sub right", "Main on both sides", "Sub on both sides" };
+
+static void on_route_chosen(int idx, void *ud)
+{
+	(void)ud;
+	if (idx < 0 || idx > 2 || G.ops.audio_route == NULL)
+		return;
+	G.route = idx;	/* AUDIO_ROUTE_AUTO, _MAIN, _SUB in this order */
+	G.ops.audio_route(G.ops.ctx, idx);
+}
+
+// A rig with two receivers and dual watch in its rig file
+static bool rig_has_dw(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+
+	return r != NULL && r->receivers >= 2 && rigfile_cmd(r, "VFO Dual Watch") != NULL;
+}
+
 static void on_power_chosen(int idx, void *ud)
 {
 	static const char *const C_SURE[] = { "No", "Yes, power off" };
 
 	(void)ud;
-	if (idx == 2 && G.ops.test_tone != NULL) {
+	if (idx >= 0 && idx < MENU_N && G.menu[idx] == MENU_TONE) {
 		G.tone_on = !G.tone_on;
 		G.ops.test_tone(G.ops.ctx, G.tone_on ? 1 : 0);
+		return;
+	}
+	if (idx >= 0 && idx < MENU_N && G.menu[idx] == MENU_AUDIO) {
+		ui_chooser_open("Audio (two receivers)", C_ROUTES, 3, G.route, on_route_chosen, NULL);
 		return;
 	}
 	if (G.ops.power == NULL)
@@ -423,14 +472,25 @@ static void on_overlay_power_on(lv_event_t *e)
 
 static void on_model(lv_event_t *e)
 {
-	// The test tone (2026-11-15): 1 kHz at -6 dBFS in place of the mic while keyed, to
-	// tell the mic chain from the rig's LAN input
-	static const char *const C_TONE_OFF[] = { "Power on", "Power off", "Test tone on" };
-	static const char *const C_TONE_ON[] = { "Power on", "Power off", "Test tone off" };
+	// Power on / off, the test tone (1 kHz at -6 dBFS in place of the mic while keyed, to
+	// tell the mic chain from the rig's LAN input) and, for two receivers, the audio route
+	static const char *names[MENU_N];
+	size_t n = 0;
 
 	(void)e;
-	ui_chooser_open("Rig", G.tone_on ? C_TONE_ON : C_TONE_OFF, G.ops.test_tone != NULL ? 3 : 2, -1,
-			on_power_chosen, NULL);
+	G.menu[n] = MENU_POWER_ON;
+	names[n++] = "Power on";
+	G.menu[n] = MENU_POWER_OFF;
+	names[n++] = "Power off";
+	if (G.ops.test_tone != NULL) {
+		G.menu[n] = MENU_TONE;
+		names[n++] = G.tone_on ? "Test tone off" : "Test tone on";
+	}
+	if (G.ops.audio_route != NULL && rig_has_dw()) {
+		G.menu[n] = MENU_AUDIO;
+		names[n++] = "Audio: main / sub";
+	}
+	ui_chooser_open("Rig", names, n, -1, on_power_chosen, NULL);
 }
 
 static void on_agc_chosen(int idx, void *ud)
@@ -693,6 +753,8 @@ static void build_freq(lv_obj_t *scr)
 	G.l_agc = tap_label(r, G.f_med, C_TEXT, "", on_agc);
 	G.l_att = tap_label(r, G.f_med, C_TEXT, "", on_att);
 	G.l_pre = tap_label(r, G.f_med, C_TEXT, "", on_pre);
+	G.l_dw = tap_label(r, G.f_med, C_DIM, "", on_dw);
+	lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
 	G.l_split = label(r, G.f_med, C_AMBER, "");
 }
 
@@ -715,6 +777,15 @@ static void build_scope(lv_obj_t *scr, int32_t spec_h, int32_t wf_h)
 	G.l_scope_mode = tap_label(G.scope.spec, G.f_small, C_ACCENT, "", on_scope_mode);
 	lv_obj_add_event_cb(G.l_scope_mode, on_scope_mode_long, LV_EVENT_LONG_PRESSED, NULL);
 	lv_obj_align(G.l_scope_mode, LV_ALIGN_TOP_RIGHT, -U(6), U(2));
+
+	// The other receiver while dual watch is on: over the top left of the spectrum, on a
+	// dark strip, so it costs no height (a row would take it from the scope on every rig)
+	G.l_sub = label(G.scope.spec, G.f_med, C_SUB, "");
+	lv_obj_set_style_bg_color(G.l_sub, lv_color_hex(C_BG), 0);
+	lv_obj_set_style_bg_opa(G.l_sub, LV_OPA_70, 0);
+	lv_obj_set_style_pad_hor(G.l_sub, U(4), 0);
+	lv_obj_align(G.l_sub, LV_ALIGN_TOP_LEFT, U(4), U(2));
+	lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_bottom(lv_obj_t *scr)
@@ -935,6 +1006,34 @@ static void update_lines(void)
 	}
 
 	set_text_if(G.l_split, G.st.split.valid && G.st.split.value ? "SPLIT" : "");
+
+	// Dual watch: DW dim while off, amber while on; only for a rig with two receivers
+	// and the command. The other receiver (Icom 25 01 / 26 01: the unselected one, the
+	// sub while main is selected) over the spectrum while it is on
+	if (rig_has_dw() && G.st.dual_watch.valid) {
+		const bool dw = G.st.dual_watch.value != 0;
+		const struct radio_rx *sub = &G.st.rx[1];
+
+		set_text_if(G.l_dw, "DW");
+		lv_obj_set_style_text_color(G.l_dw, lv_color_hex(dw ? C_AMBER : C_DIM), 0);
+		lv_obj_remove_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
+
+		if (dw && sub->freq_valid[0]) {
+			char f[32];
+			char line[128];
+
+			fmt_freq(f, sizeof(f), sub->freq_hz[0]);
+			snprintf(line, sizeof(line), "SUB  %s  %s%s", f, sub->mode[0].valid ? sub->mode[0].name : "",
+					sub->mode[0].valid && sub->mode[0].data ? "-D" : "");
+			set_text_if(G.l_sub, line);
+			lv_obj_remove_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
+		} else {
+			lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
+		}
+	} else {
+		lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
+	}
 	set_text_if(G.l_vfo, G.st.split.valid && G.st.split.value ? "VFO A/B" : "VFO A");
 
 	// Scope label

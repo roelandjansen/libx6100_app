@@ -340,6 +340,17 @@ static void test_two_channels(void)
 	push_read(&a, 0x4000, 0, 10, out);
 	CHECK(out[959 * 2 + 1] == out[959 * 2]);
 
+	// The menu's route: the sub on both sides, the main on both sides, auto again
+	audio_rx_set_route(&a, AUDIO_ROUTE_SUB);
+	push_read(&a, 0x4000, 0x2000, 1, out);
+	CHECK(near(out[500 * 2], 0.25, 1e-3) && near(out[500 * 2 + 1], 0.25, 1e-3));
+	audio_rx_set_route(&a, AUDIO_ROUTE_MAIN);
+	push_read(&a, 0x4000, 0x2000, 1, out);
+	CHECK(near(out[500 * 2], 0.5, 1e-3) && near(out[500 * 2 + 1], 0.5, 1e-3));
+	audio_rx_set_route(&a, AUDIO_ROUTE_AUTO);
+	push_read(&a, 0x4000, 0x2000, 2, out);
+	CHECK(near(out[959 * 2 + 1], 0.25, 1e-3));
+
 	audio_rx_stop(&a);
 }
 

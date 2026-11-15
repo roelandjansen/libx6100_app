@@ -1389,6 +1389,12 @@ void session_set_volume(struct session *s, uint8_t volume)
 		audio_rx_set_volume(s->arx, volume);
 }
 
+void session_set_audio_route(struct session *s, int route)
+{
+	if (s->arx != NULL)
+		audio_rx_set_route(s->arx, route);
+}
+
 void session_get_state(struct session *s, struct radio_state *out)
 {
 	pthread_mutex_lock(&s->lock);

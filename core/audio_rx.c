@@ -64,6 +64,7 @@ void audio_rx_init(struct audio_rx *a, uint32_t dev_rate)
 	memset(a, 0, sizeof(*a));
 	a->dev_rate = dev_rate;
 	atomic_init(&a->volume, 255u);
+	atomic_init(&a->route, AUDIO_ROUTE_AUTO);
 	atomic_init(&a->underrun, false);
 	atomic_init(&a->head, 0);
 	atomic_init(&a->tail, 0);
@@ -114,6 +115,11 @@ void audio_rx_stop(struct audio_rx *a)
 void audio_rx_set_volume(struct audio_rx *a, uint8_t volume)
 {
 	atomic_store(&a->volume, volume);
+}
+
+void audio_rx_set_route(struct audio_rx *a, int route)
+{
+	atomic_store(&a->route, route == AUDIO_ROUTE_MAIN || route == AUDIO_ROUTE_SUB ? route : AUDIO_ROUTE_AUTO);
 }
 
 //
@@ -180,11 +186,18 @@ void audio_rx_push(struct audio_rx *a, const uint8_t *payload, size_t len, int64
 	// Volume, then channel conversion to stereo
 	{
 		const float target = a->r_quiet >= a->rx_rate / 1000u * C_R_QUIET_MS ? 1.0f : 0.0f;
+		const int route = atomic_load(&a->route);
 		const float step = 1000.0f / ((float)a->rx_rate * (float)C_FILL_FADE_MS);
 
 		for (i = 0; i < frames; i++) {
 			if (ch == 1) {
 				const float v = a->decoded[i] * gain;
+
+				a->stereo[i * 2] = v;
+				a->stereo[i * 2 + 1] = v;
+			} else if (route != AUDIO_ROUTE_AUTO) {
+				// One receiver on both sides (the menu): main left, sub right
+				const float v = a->decoded[i * 2 + (route == AUDIO_ROUTE_SUB ? 1 : 0)] * gain;
 
 				a->stereo[i * 2] = v;
 				a->stereo[i * 2 + 1] = v;

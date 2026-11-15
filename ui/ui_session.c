@@ -106,6 +106,11 @@ static void op_test_tone(void *ctx, int on)
 	tx_set_test_tone(ctx, on);
 }
 
+static void op_audio_route(void *ctx, int route)
+{
+	session_set_audio_route(ctx, route);
+}
+
 void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 {
 	ops->ctx = s;
@@ -120,6 +125,7 @@ void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 	ops->get_value = op_get_value;
 	ops->power = op_power;
 	ops->test_tone = op_test_tone;
+	ops->audio_route = op_audio_route;
 	ops->set_span = op_set_span;
 	ops->set_step = op_set_step;
 	ops->get_step = op_get_step;
