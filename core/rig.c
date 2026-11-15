@@ -770,6 +770,19 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 	case K_BCD1:
 		if (dl < 1)
 			return 0;
+
+		// The active receiver changed (the app or the rig; 2026-11-15): selected and
+		// unselected swap, so both receivers' frequency and mode are asked at once. RX
+		// Mode is polled at medium priority only: the mode trailed the frequency
+		if (ke->field == offsetof(struct radio_state, rx_selected) &&
+				(!r->st.rx_selected.valid || r->st.rx_selected.value != bcd1(d[0]))) {
+			uint8_t rx;
+
+			for (rx = 0; rx < (uint8_t)r->st.receivers; rx++) {
+				add_named(r, RIG_PRIO_IMMEDIATE, "RX Frequency", false, rx, false, 0);
+				add_named(r, RIG_PRIO_IMMEDIATE, "RX Mode", false, rx, false, 0);
+			}
+		}
 		set_value(r, ke->field, bcd1(d[0]));
 		return RADIO_CHG_FLAGS;
 
