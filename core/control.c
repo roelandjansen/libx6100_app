@@ -382,10 +382,12 @@ static void on_conninfo(struct control *c, const uint8_t *b, int64_t now_ms)
 						proto_get_le16(b + PROTO_OFF_SEQ), now_ms);
 			} else {
 				// Busy without another client: our own earlier session not yet
-				// released, or the rig itself; the token renewal asks again
-				snprintf(msg, sizeof(msg), "%s busy (%s), waiting", c->radios[0].name,
+				// released (a reconnect within about 1 s, IC-7851); the session logs
+				// out and in again (busy_self)
+				snprintf(msg, sizeof(msg), "%s busy (%s), retrying", c->radios[0].name,
 						computer[0] != '\0' ? computer : "no client");
 				set_status(c, msg);
+				c->busy_self = true;
 			}
 		} else {
 			snprintf(msg, sizeof(msg), "%s available", c->radios[0].name);

@@ -135,6 +135,7 @@ struct control {
 	char connection[17];
 	bool high_bandwidth;
 	bool ayt_warned;
+	bool busy_self;		/* busy without another client (our old session): log in again */
 
 	//
 	// Radios from the capabilities packet

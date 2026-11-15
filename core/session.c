@@ -38,6 +38,8 @@
 #define C_LINGER_MS		1000	/* after the shutdown, before the sockets close */
 #define C_BYE_PERIOD_MS		250	/* disconnect repeated at this period ... */
 #define C_BYE_REPEATS		3	/* ... this many times in all */
+#define C_BUSY_RETRIES		10	/* "busy" without another client: log in again ... */
+#define C_BUSY_GAP_MS		1000	/* ... this long after the last try at the least */
 
 struct ctl_cmd {
 	enum session_ctl_op op;
@@ -90,6 +92,7 @@ struct session {
 	//
 	int64_t t_streams_open;
 	int peer_closed;	/* 1 + stream (0 control, 1 CI-V, 2 audio): the rig sent a disconnect */
+	int busy_retries;	/* logins again after "busy" without another client */
 	unsigned int rand_state;
 
 	//
@@ -939,6 +942,40 @@ static void *net_thread(void *arg)
 			audio_stream_tick(&s->audio, now);
 			if (s->rig_active)
 				rig_tick(&s->rig, now);
+		}
+
+		// "Busy" without another client: our old session still closing on the rig (a
+		// reconnect within about 1 s, IC-7851, 2026-11-15). The rig gives its connection
+		// info only after a login, so: log out as at a disconnect, wait, log in again
+		if (s->ctl.busy_self && !s->streams_open) {
+			if (s->busy_retries < C_BUSY_RETRIES) {
+				const int64_t t0 = now;
+				struct pollfd w = { s->wake[0], POLLIN, 0 };
+
+				s->busy_retries++;
+				control_shutdown(&s->ctl, now);
+				linger(s, false);
+				now = clock_mono_ms();
+				// The gap at the least; a wake (disconnect) ends it
+				if (now - t0 < C_BUSY_GAP_MS && poll(&w, 1, (int)(C_BUSY_GAP_MS - (now - t0))) < 0 &&
+						errno != EINTR)
+					break;
+				if (s->stop)
+					break;
+
+				now = clock_mono_ms();
+				control_init(&s->ctl, &cfg, &io_ctl, &cev,
+						udp_stream_endpoint_id(s->u_ctl.local_ip, s->u_ctl.local_port), now);
+				snprintf(s->ctl.status, sizeof(s->ctl.status), "Radio busy (old session), login again %d/%d",
+						s->busy_retries, C_BUSY_RETRIES);
+				update_info(s);
+				notify(s);
+				continue;
+			}
+
+			s->ctl.busy_self = false;
+			snprintf(s->ctl.status, sizeof(s->ctl.status), "Radio busy (old session) after %d logins, waiting",
+					C_BUSY_RETRIES);
 		}
 
 		if (link_lost(s, now)) {

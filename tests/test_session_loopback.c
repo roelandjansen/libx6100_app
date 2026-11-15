@@ -44,6 +44,7 @@ struct fake_server {
 	int got_request;
 	int reject_login;
 	int got_id_query;
+	int busy_logins;	/* answer "busy, our own name" to this many logins */
 };
 
 static int srv_socket(uint16_t *port)
@@ -118,6 +119,14 @@ static void srv_handle_control(struct fake_server *f, const uint8_t *b, size_t l
 		srv_hdr(p, PROTO_CONNINFO_SIZE, 0);
 		proto_put_le16(p + 0x27, 0x8010);
 		memcpy(p + 0x40, "X6100", 5);
+		if (f->busy_logins > 0) {
+			// Still held by our old session: busy, our own client name, its address
+			f->busy_logins--;
+			proto_put_le32(p + 0x60, 1);
+			memcpy(p + 0x64, "test-wfview", 11);
+			p[0x84] = 127;
+			p[0x87] = 1;
+		}
 		srv_send(f, 0, p, PROTO_CONNINFO_SIZE, 1);
 	} else if (len == PROTO_CONNINFO_SIZE && b[0x15] == 0x03) {
 		f->got_request++;
@@ -326,6 +335,29 @@ int main(void)
 	}
 	CHECK(info.state == SESSION_LOST);
 	CHECK(strcmp(info.status, "Radio closed the control stream") == 0);
+	session_disconnect(s);
+
+	// Busy, our own name (old session still closing): logged out and in again, then in
+	until = clock_mono_ms() + 500;
+	while (clock_mono_ms() < until)
+		srv_poll(&f, 20);
+	f.civ_open = 0;
+	f.got_login = 0;
+	f.got_token_remove = 0;
+	f.busy_logins = 2;
+	CHECK(session_connect(&s, &p, NULL) == 0);
+	until = clock_mono_ms() + 10000;
+	while (clock_mono_ms() < until) {
+		srv_poll(&f, 20);
+		srv_send_data(&f);
+		session_get_info(s, &info);
+		if (info.state == SESSION_CONNECTED && info.civ_frames > 5)
+			break;
+	}
+	CHECK(info.state == SESSION_CONNECTED);
+	CHECK(f.got_login == 3);
+	CHECK(f.got_token_remove == 2);
+	CHECK(f.busy_logins == 0);
 	session_disconnect(s);
 
 	// Second run: server rejects the login; reason and wfview's text must reach the snapshot
