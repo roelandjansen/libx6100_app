@@ -85,6 +85,8 @@ public class ProfileActivity extends Activity {
 		int txCodec = 0x04;
 		int txRate = 48000;
 		int pttTimeout = 300;
+		boolean micBt;			/* the mic: false the phone, true a Bluetooth headset */
+		int micGain = 100;		/* %, 100-400 */
 	}
 
 	//
@@ -101,6 +103,7 @@ public class ProfileActivity extends Activity {
 	private static final int REQ_PERMS = 1;
 	private static final int MAX_CONNS = 16;
 	private static final String NEW_ENTRY = "(new connection)";
+	private static final String[] MIC_NAMES = { "Phone", "Bluetooth headset" };
 
 	private SharedPreferences prefs;
 	private SharedPreferences store;
@@ -115,6 +118,8 @@ public class ProfileActivity extends Activity {
 	private EditText name;
 	private EditText latency;
 	private EditText pttTimeout;
+	private Spinner micSrc;
+	private EditText micGain;
 	private Spinner rxCodec;
 	private Spinner rxRate;
 	private Spinner txCodec;
@@ -194,6 +199,8 @@ public class ProfileActivity extends Activity {
 		c.txCodec = prefs.getInt("tx_codec", 0x04);
 		c.txRate = prefs.getInt("tx_rate", 48000);
 		c.pttTimeout = prefs.getInt("ptt_timeout", 300);
+		c.micBt = prefs.getBoolean("mic_bt", false);
+		c.micGain = prefs.getInt("mic_gain", 100);
 		return c;
 	}
 
@@ -219,6 +226,8 @@ public class ProfileActivity extends Activity {
 			c.txCodec = store.getInt("tx_codec_" + i, 0x04);
 			c.txRate = store.getInt("tx_rate_" + i, 48000);
 			c.pttTimeout = store.getInt("ptt_timeout_" + i, 300);
+			c.micBt = store.getBoolean("mic_bt_" + i, false);
+			c.micGain = store.getInt("mic_gain_" + i, 100);
 			conns.add(c);
 		}
 	}
@@ -240,7 +249,9 @@ public class ProfileActivity extends Activity {
 				.putInt("latency_" + i, c.latency)
 				.putInt("tx_codec_" + i, c.txCodec)
 				.putInt("tx_rate_" + i, c.txRate)
-				.putInt("ptt_timeout_" + i, c.pttTimeout);
+				.putInt("ptt_timeout_" + i, c.pttTimeout)
+				.putBoolean("mic_bt_" + i, c.micBt)
+				.putInt("mic_gain_" + i, c.micGain);
 		}
 		ed.apply();
 	}
@@ -268,6 +279,8 @@ public class ProfileActivity extends Activity {
 		txCodec.setSelection(indexOf(TX_CODECS, c.txCodec, 1));
 		txRate.setSelection(indexOf(RATES, c.txRate, 0));
 		pttTimeout.setText(Integer.toString(c.pttTimeout));
+		micSrc.setSelection(c.micBt ? 1 : 0);
+		micGain.setText(Integer.toString(c.micGain));
 	}
 
 	private Conn read() {
@@ -286,6 +299,8 @@ public class ProfileActivity extends Activity {
 		c.txCodec = TX_CODECS[txCodec.getSelectedItemPosition()];
 		c.txRate = RATES[txRate.getSelectedItemPosition()];
 		c.pttTimeout = parse(pttTimeout, 300);
+		c.micBt = micSrc.getSelectedItemPosition() == 1;
+		c.micGain = Math.max(100, Math.min(400, parse(micGain, 100)));
 		return c;
 	}
 
@@ -360,6 +375,8 @@ public class ProfileActivity extends Activity {
 		txCodec = choice("TX codec", TX_CODEC_NAMES, 1);
 		txRate = choice("TX sample rate", RATE_NAMES, 0);
 		pttTimeout = field("PTT timeout (s, 0 = off, 30-999)", "", number);
+		micSrc = choice("Microphone", MIC_NAMES, 0);
+		micGain = field("Mic gain (%, 100-400)", "", number);
 
 		Button connect = new Button(this);
 		connect.setText("Connect");
@@ -460,6 +477,8 @@ public class ProfileActivity extends Activity {
 			.putInt("tx_codec", c.txCodec)
 			.putInt("tx_rate", c.txRate)
 			.putInt("ptt_timeout", c.pttTimeout)
+			.putBoolean("mic_bt", c.micBt)
+			.putInt("mic_gain", c.micGain)
 			.apply();
 	}
 

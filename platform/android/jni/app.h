@@ -19,7 +19,7 @@
 // Before app_start (from the Java side, JNI)
 //
 
-void app_set_profile(const struct profile *p, bool mic_allowed);
+void app_set_profile(const struct profile *p, bool mic_allowed, bool bt_mic);
 void app_set_insets(int32_t top, int32_t bottom);
 
 //

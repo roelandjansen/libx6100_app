@@ -18,6 +18,7 @@ struct session;
 // Lifecycle (UI / main thread)
 //
 
+void audio_aa_set_voice(bool voice);	/* before opening: Bluetooth headset in call mode */
 int audio_aa_open_playback(void);
 int audio_aa_open_capture(void);
 void audio_aa_attach(struct session *s);

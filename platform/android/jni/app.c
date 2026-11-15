@@ -104,10 +104,12 @@ static void wake(void)
 		ALooper_wake(l);
 }
 
-void app_set_profile(const struct profile *p, bool mic_allowed)
+// bt_mic: the Java side put a Bluetooth headset in call mode; the streams follow it
+void app_set_profile(const struct profile *p, bool mic_allowed, bool bt_mic)
 {
 	G.prof = *p;
 	G.mic_allowed = mic_allowed;
+	audio_aa_set_voice(bt_mic);
 }
 
 void app_set_insets(int32_t top, int32_t bottom)

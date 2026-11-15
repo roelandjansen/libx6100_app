@@ -14,12 +14,15 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Insets;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
 import android.view.WindowInsets;
 import android.view.WindowManager;
+import android.widget.Toast;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -37,7 +40,59 @@ public class RadioActivity extends NativeActivity {
 
 	private static native void nativeSetProfile(String host, int port, String user, String pass, String name,
 			int rxCodec, int rxRate, int latency, int txCodec, int txRate, String rigDir, boolean mic,
-			int pttTimeout);
+			int pttTimeout, boolean btMic, int micGain);
+
+	private boolean btRouted;
+
+	//
+	// Bluetooth headset as the mic (2026-11-15): a headset's mic is only used in call
+	// mode, so the session runs in it with the headset as the call device; RX goes over
+	// the call link too (narrower than media, enough for SSB). Without one: the phone's
+	// mic, said so. Undone on leaving
+	//
+	@SuppressWarnings("deprecation")
+	private boolean routeBluetooth() {
+		AudioManager am = getSystemService(AudioManager.class);
+
+		if (am == null)
+			return false;
+		am.setMode(AudioManager.MODE_IN_COMMUNICATION);
+		if (Build.VERSION.SDK_INT >= 31) {
+			for (AudioDeviceInfo d : am.getAvailableCommunicationDevices()) {
+				int t = d.getType();
+
+				if (t == AudioDeviceInfo.TYPE_BLUETOOTH_SCO || t == AudioDeviceInfo.TYPE_BLE_HEADSET) {
+					if (am.setCommunicationDevice(d))
+						return true;
+				}
+			}
+			am.setMode(AudioManager.MODE_NORMAL);
+			return false;
+		}
+		if (!am.isBluetoothScoAvailableOffCall()) {
+			am.setMode(AudioManager.MODE_NORMAL);
+			return false;
+		}
+		am.startBluetoothSco();
+		am.setBluetoothScoOn(true);
+		return true;
+	}
+
+	@SuppressWarnings("deprecation")
+	private void unrouteBluetooth() {
+		AudioManager am = getSystemService(AudioManager.class);
+
+		if (am == null || !btRouted)
+			return;
+		if (Build.VERSION.SDK_INT >= 31) {
+			am.clearCommunicationDevice();
+		} else {
+			am.setBluetoothScoOn(false);
+			am.stopBluetoothSco();
+		}
+		am.setMode(AudioManager.MODE_NORMAL);
+		btRouted = false;
+	}
 
 	private static native void nativeSetInsets(int top, int bottom);
 
@@ -76,10 +131,16 @@ public class RadioActivity extends NativeActivity {
 		SharedPreferences p = getSharedPreferences("profile", MODE_PRIVATE);
 		boolean mic = checkSelfPermission(Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED;
 
+		// Before the native side opens its streams: they follow the call device
+		btRouted = mic && p.getBoolean("mic_bt", false) && routeBluetooth();
+		if (mic && p.getBoolean("mic_bt", false) && !btRouted)
+			Toast.makeText(this, "No Bluetooth headset: phone mic", Toast.LENGTH_LONG).show();
+
 		nativeSetProfile(p.getString("host", ""), p.getInt("port", 50001), p.getString("user", ""),
 				p.getString("pass", ""), p.getString("name", "android"), p.getInt("rx_codec", 0x04),
 				p.getInt("rx_rate", 48000), p.getInt("latency", 150), p.getInt("tx_codec", 0x04),
-				p.getInt("tx_rate", 48000), copyRigs(), mic, p.getInt("ptt_timeout", 300));
+				p.getInt("tx_rate", 48000), copyRigs(), mic, p.getInt("ptt_timeout", 300),
+				btRouted, p.getInt("mic_gain", 100));
 
 		Intent svc = new Intent(this, RadioService.class);
 		svc.putExtra(RadioService.EXTRA_MIC, mic);
@@ -107,5 +168,6 @@ public class RadioActivity extends NativeActivity {
 	protected void onDestroy() {
 		super.onDestroy();
 		stopService(new Intent(this, RadioService.class));
+		unrouteBluetooth();
 	}
 }

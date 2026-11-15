@@ -23,6 +23,7 @@
 static AAudioStream *G_OUT;
 static AAudioStream *G_IN;
 static bool G_WANT_IN;
+static bool G_VOICE;		/* a Bluetooth headset in call mode: voice streams (2026-11-15) */
 static atomic_bool G_OUT_ERR;
 static atomic_bool G_IN_ERR;
 static atomic_bool G_IN_LOST;
@@ -71,12 +72,16 @@ static AAudioStream *open_stream(bool input)
 	AAudioStreamBuilder_setSampleRate(b, AUDIO_AA_RATE);
 	AAudioStreamBuilder_setChannelCount(b, input ? 1 : 2);
 	if (input) {
-		// Voice recognition: no echo cancel / noise suppression on the mic path
-		AAudioStreamBuilder_setInputPreset(b, AAUDIO_INPUT_PRESET_VOICE_RECOGNITION);
+		// Phone: voice recognition, no echo cancel / noise suppression on the mic path.
+		// Bluetooth headset: voice communication, the preset that takes the headset's
+		// mic in call mode (with the phone's voice processing and its level control)
+		AAudioStreamBuilder_setInputPreset(b, G_VOICE ? AAUDIO_INPUT_PRESET_VOICE_COMMUNICATION
+				: AAUDIO_INPUT_PRESET_VOICE_RECOGNITION);
 		AAudioStreamBuilder_setDataCallback(b, in_cb, NULL);
 		AAudioStreamBuilder_setErrorCallback(b, err_cb, &G_IN_ERR);
 	} else {
-		AAudioStreamBuilder_setUsage(b, AAUDIO_USAGE_MEDIA);
+		// Bluetooth headset: RX on the call link too (in call mode media would leave it)
+		AAudioStreamBuilder_setUsage(b, G_VOICE ? AAUDIO_USAGE_VOICE_COMMUNICATION : AAUDIO_USAGE_MEDIA);
 		AAudioStreamBuilder_setContentType(b, AAUDIO_CONTENT_TYPE_SPEECH);
 		AAudioStreamBuilder_setDataCallback(b, out_cb, NULL);
 		AAudioStreamBuilder_setErrorCallback(b, err_cb, &G_OUT_ERR);
@@ -102,6 +107,11 @@ static AAudioStream *open_stream(bool input)
 	if (!input)
 		AAudioStream_setBufferSizeInFrames(st, AAudioStream_getFramesPerBurst(st) * 2);
 	return st;
+}
+
+void audio_aa_set_voice(bool voice)
+{
+	G_VOICE = voice;
 }
 
 int audio_aa_open_playback(void)

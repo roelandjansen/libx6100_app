@@ -109,6 +109,12 @@ static struct {
 	bool power_on_sent;	/* tapped: "switching on" until the rig answers */
 
 	//
+	// The mic peak on the PTT button while keyed, held 0.5 s
+	//
+	double tx_hold_db;
+	uint32_t tx_hold_t;
+
+	//
 	// Last snapshots
 	//
 	struct radio_state st;
@@ -951,10 +957,25 @@ static void update_lines(void)
 			lv_obj_remove_flag(G.b_tune, LV_OBJ_FLAG_HIDDEN);
 	}
 	lv_obj_set_style_bg_color(G.b_ptt, lv_color_hex(G.info.ptt ? C_RED : 0x3a2328), 0);
-	if (G.info.ptt && G.info.ptt_remaining_s > 0 && G.info.ptt_remaining_s <= 30)
+	if (G.info.ptt && G.info.ptt_remaining_s > 0 && G.info.ptt_remaining_s <= 30) {
 		snprintf(buf, sizeof(buf), "TX %d", G.info.ptt_remaining_s);
-	else
-		snprintf(buf, sizeof(buf), "%s", G.info.ptt ? "TX" : "PTT");
+	} else if (G.info.ptt) {
+		// The mic peak while keyed, after the mic gain (2026-11-15): held 0.5 s, so it
+		// can be read; CLIP at full scale
+		const uint32_t t = lv_tick_get();
+		const double db = G.info.tx_peak > 1e-5f ? 20.0 * log10((double)G.info.tx_peak) : -99.0;
+
+		if (db > G.tx_hold_db || (uint32_t)(t - G.tx_hold_t) >= 500u) {
+			G.tx_hold_db = db;
+			G.tx_hold_t = t;
+		}
+		if (G.tx_hold_db > -0.1)
+			snprintf(buf, sizeof(buf), "%s", "TX CLIP");
+		else
+			snprintf(buf, sizeof(buf), "TX %d dB", (int)lround(G.tx_hold_db));
+	} else {
+		snprintf(buf, sizeof(buf), "%s", "PTT");
+	}
 	set_text_if(G.l_ptt, buf);
 }
 
