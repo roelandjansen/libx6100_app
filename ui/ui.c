@@ -105,6 +105,8 @@ static struct {
 	//
 	lv_obj_t *overlay;
 	lv_obj_t *l_overlay;
+	lv_obj_t *b_power_on;	/* in the overlay: the rig on while it gives no state */
+	bool power_on_sent;	/* tapped: "switching on" until the rig answers */
 
 	//
 	// Last snapshots
@@ -397,6 +399,14 @@ static void on_power_chosen(int idx, void *ud)
 		G.ops.power(G.ops.ctx, 1);
 	else if (idx == 1)
 		ui_chooser_open("Power off the rig?", C_SURE, 2, 0, on_power_off_sure, NULL);
+}
+
+// The overlay's Power on (a rig in standby answers nothing, so no state comes)
+static void on_overlay_power_on(lv_event_t *e)
+{
+	(void)e;
+	if (G.ops.power != NULL && G.ops.power(G.ops.ctx, 1) == 0)
+		G.power_on_sent = true;
 }
 
 static void on_model(lv_event_t *e)
@@ -716,6 +726,13 @@ static void build_overlay(lv_obj_t *scr)
 	lv_obj_set_width(G.l_overlay, LV_PCT(90));
 	lv_obj_set_style_text_align(G.l_overlay, LV_TEXT_ALIGN_CENTER, 0);
 	lv_obj_center(G.l_overlay);
+
+	// Power on while the rig gives no state (in standby it answers nothing, and this
+	// overlay covered the rig name that opens the power menu, 2026-11-15)
+	G.b_power_on = button(G.overlay, U(220), U(60), "Power on", 0x1f5d3a, NULL);
+	lv_obj_align(G.b_power_on, LV_ALIGN_CENTER, 0, U(110));
+	lv_obj_add_event_cb(G.b_power_on, on_overlay_power_on, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_flag(G.b_power_on, LV_OBJ_FLAG_HIDDEN);
 }
 
 int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font_data *font,
@@ -934,11 +951,19 @@ static void update_overlay(void)
 
 	if (G.info.state == SESSION_CONNECTED && G.st.rig_valid) {
 		lv_obj_add_flag(G.overlay, LV_OBJ_FLAG_HIDDEN);
+		G.power_on_sent = false;
 		return;
 	}
 
+	// Connected, the rig's address known, no state: perhaps in standby; Power on offered
+	if (G.info.state == SESSION_CONNECTED && G.info.civ_addr != 0x00 && G.ops.power != NULL)
+		lv_obj_remove_flag(G.b_power_on, LV_OBJ_FLAG_HIDDEN);
+	else
+		lv_obj_add_flag(G.b_power_on, LV_OBJ_FLAG_HIDDEN);
+
 	if (G.info.state == SESSION_CONNECTED)
-		snprintf(buf, sizeof(buf), "%s\nreading radio state", G.info.radio_name);
+		snprintf(buf, sizeof(buf), "%s\n%s", G.info.radio_name,
+				G.power_on_sent ? "switching on ..." : "reading radio state\n(rig off? Power on)");
 	else if (G.info.status[0] != '\0')
 		snprintf(buf, sizeof(buf), "%s\n%s", session_state_name(G.info.state), G.info.status);
 	else
