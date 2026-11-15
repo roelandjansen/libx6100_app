@@ -125,7 +125,9 @@ static struct {
 	// over the top of the spectrum while it is on, the audio route from the menu
 	//
 	lv_obj_t *l_dw;
-	lv_obj_t *l_sub;
+	lv_obj_t *l_sub;	/* the other receiver; a tap makes it the active one (step 2) */
+	lv_obj_t *l_active;	/* MAIN / SUB on the big frequency: the active receiver */
+	uint32_t rxsel_next;	/* next ask of VFO Main/Sub Band */
 	int route;		/* AUDIO_ROUTE_* */
 	int menu[MENU_N];	/* the rig-name menu as shown: MENU_* per line */
 
@@ -364,6 +366,36 @@ static void on_att(lv_event_t *e)
 	(void)e;
 	if (r != NULL && r->n_attenuators > 0)
 		choose_named("Attenuator", "Attenuator Status", r->attenuators, r->n_attenuators, &G.st.attenuator);
+}
+
+// Step 2 (2026-11-15): the line over the spectrum is the other receiver; a tap makes it
+// the active one on the rig (VFO Main/Sub Band 0 main, 1 sub), the scope with it (Scope
+// Main/Sub). Tuning, mode and filter then go there: Icom's selected receiver
+static void on_sub_tap(lv_event_t *e)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const int to = G.st.rx_selected.valid && G.st.rx_selected.value != 0 ? 0 : 1;
+
+	(void)e;
+	if (r == NULL || rigfile_cmd(r, "VFO Main/Sub Band") == NULL)
+		return;
+	G.ops.set_value(G.ops.ctx, "VFO Main/Sub Band", to);
+	if (rigfile_cmd(r, "Scope Main/Sub") != NULL)
+		G.ops.set_value(G.ops.ctx, "Scope Main/Sub", to);
+}
+
+// The active receiver, asked once a second on a dual watch rig (the rig file does not
+// poll it; a switch on the rig shows that way)
+static void rxsel_poll(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const uint32_t t = lv_tick_get();
+
+	if (G.ops.get_value == NULL || !G.st.rig_valid || r == NULL || r->receivers < 2 ||
+			rigfile_cmd(r, "VFO Main/Sub Band") == NULL || (int32_t)(t - G.rxsel_next) < 0)
+		return;
+	G.ops.get_value(G.ops.ctx, "VFO Main/Sub Band");
+	G.rxsel_next = t + 1000u;
 }
 
 // DW: dual watch on / off on the rig (VFO Dual Watch 1 / 0); the rig file polls it, the
@@ -743,6 +775,10 @@ static void build_freq(lv_obj_t *scr)
 
 	G.l_freq = tap_label(r, G.f_freq, C_FREQ, "-.---.---", on_freq);
 	lv_obj_center(G.l_freq);
+	// MAIN / SUB: the active receiver, top left of the frequency box (dual watch rigs)
+	G.l_active = label(r, G.f_small, C_DIM, "");
+	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(8), U(2));
+	lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
 
 	r = row(scr, U(32));
 	G.l_mode = tap_label(r, G.f_large, C_ACCENT, "---", on_mode);
@@ -780,7 +816,7 @@ static void build_scope(lv_obj_t *scr, int32_t spec_h, int32_t wf_h)
 
 	// The other receiver while dual watch is on: over the top left of the spectrum, on a
 	// dark strip, so it costs no height (a row would take it from the scope on every rig)
-	G.l_sub = label(G.scope.spec, G.f_med, C_SUB, "");
+	G.l_sub = tap_label(G.scope.spec, G.f_med, C_SUB, "", on_sub_tap);
 	lv_obj_set_style_bg_color(G.l_sub, lv_color_hex(C_BG), 0);
 	lv_obj_set_style_bg_opa(G.l_sub, LV_OPA_70, 0);
 	lv_obj_set_style_pad_hor(G.l_sub, U(4), 0);
@@ -1010,21 +1046,37 @@ static void update_lines(void)
 	// Dual watch: DW dim while off, amber while on; only for a rig with two receivers
 	// and the command. The other receiver (Icom 25 01 / 26 01: the unselected one, the
 	// sub while main is selected) over the spectrum while it is on
+	//
+	// Step 2: rx[0] is Icom's selected receiver (the active one: tuning, mode and filter
+	// go there), rx[1] the other. The big frequency is the active one, tagged MAIN or
+	// SUB; the line over the spectrum the other, a tap swaps. Shown while dual watch is
+	// on, or while the sub is the active one (so the way back stays)
+	//
 	if (rig_has_dw() && G.st.dual_watch.valid) {
 		const bool dw = G.st.dual_watch.value != 0;
-		const struct radio_rx *sub = &G.st.rx[1];
+		const bool on_sub = G.st.rx_selected.valid && G.st.rx_selected.value != 0;
+		const struct radio_rx *other = &G.st.rx[1];
 
 		set_text_if(G.l_dw, "DW");
 		lv_obj_set_style_text_color(G.l_dw, lv_color_hex(dw ? C_AMBER : C_DIM), 0);
 		lv_obj_remove_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
 
-		if (dw && sub->freq_valid[0]) {
+		if (dw || on_sub) {
+			set_text_if(G.l_active, on_sub ? "SUB" : "MAIN");
+			lv_obj_set_style_text_color(G.l_active, lv_color_hex(on_sub ? C_SUB : C_DIM), 0);
+			lv_obj_remove_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
+		} else {
+			lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
+		}
+
+		if ((dw || on_sub) && other->freq_valid[0]) {
 			char f[32];
 			char line[128];
 
-			fmt_freq(f, sizeof(f), sub->freq_hz[0]);
-			snprintf(line, sizeof(line), "SUB  %s  %s%s", f, sub->mode[0].valid ? sub->mode[0].name : "",
-					sub->mode[0].valid && sub->mode[0].data ? "-D" : "");
+			fmt_freq(f, sizeof(f), other->freq_hz[0]);
+			snprintf(line, sizeof(line), "%s  %s  %s%s", on_sub ? "MAIN" : "SUB", f,
+					other->mode[0].valid ? other->mode[0].name : "",
+					other->mode[0].valid && other->mode[0].data ? "-D" : "");
 			set_text_if(G.l_sub, line);
 			lv_obj_remove_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
 		} else {
@@ -1033,6 +1085,7 @@ static void update_lines(void)
 	} else {
 		lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
 	}
 	set_text_if(G.l_vfo, G.st.split.valid && G.st.split.value ? "VFO A/B" : "VFO A");
 
@@ -1144,6 +1197,7 @@ void ui_poll(void)
 	}
 
 	atu_poll();
+	rxsel_poll();
 	update_lines();
 	update_meter();
 	update_overlay();

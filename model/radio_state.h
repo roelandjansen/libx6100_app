@@ -138,6 +138,8 @@ struct radio_state {
 	struct radio_value tuning_step;
 	struct radio_value tuner;
 	struct radio_value dual_watch;	// VFO Dual Watch: 0 off, 1 on (two receivers)
+	struct radio_value rx_selected;	// VFO Main/Sub Band: 0 main, 1 sub is the selected (active) receiver
+	struct radio_value scope_rx;	// Scope Main/Sub: 0 main, 1 sub on the (single) scope
 	struct radio_value split;
 	struct radio_value transmit;
 	struct radio_value noise_blanker;

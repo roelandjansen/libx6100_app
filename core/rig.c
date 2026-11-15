@@ -81,6 +81,8 @@ static const struct kind_entry C_KINDS[] = {
 	{ "Break-In Status", K_BCD1, F(break_in) },
 	{ "Tuner/ATU Status", K_BCD1, F(tuner) },
 	{ "VFO Dual Watch", K_BCD1, F(dual_watch) },
+	{ "VFO Main/Sub Band", K_BCD1, F(rx_selected) },
+	{ "Scope Main/Sub", K_BCD1, F(scope_rx) },
 	{ "Split/Duplex", K_RAW1, F(split) },
 
 	{ "AF Gain", K_BCD2, F(af_gain) },

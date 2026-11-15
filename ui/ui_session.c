@@ -15,9 +15,18 @@ static void op_get_info(void *ctx, struct session_info *out)
 	session_get_info(ctx, out);
 }
 
+// The newest scope row of either receiver (2026-11-15): the rig sends the sub's once
+// its scope is switched to the sub (Scope Main/Sub), the rows carry the receiver
 static bool op_get_scope_row(void *ctx, struct radio_scope_row *out)
 {
-	return session_get_scope_row(ctx, 0, out);
+	struct radio_scope_row sub;
+	const bool have_main = session_get_scope_row(ctx, 0, out);
+
+	if (session_get_scope_row(ctx, 1, &sub) && (!have_main || sub.seq > out->seq)) {
+		*out = sub;
+		return true;
+	}
+	return have_main;
 }
 
 static const struct rig_def *op_get_rig(void *ctx)
