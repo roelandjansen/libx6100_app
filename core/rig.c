@@ -560,6 +560,13 @@ static void have_rig_id(struct rig *r, int model)
 		if (prio == RIG_PRIO_NONE)
 			continue;
 
+		// Addition 7 (2026-11-15, not in wfview): RX Mode at High at the least. At the
+		// rig files' Medium it came round every several seconds (one Medium turn in 23
+		// ticks, shared by some fifteen items): a mode, DATA or filter change made on the
+		// rig, or on the sub (no broadcast), showed late. High: about once a second
+		if (strcmp(p->command, "RX Mode") == 0 && prio > RIG_PRIO_HIGH)
+			prio = RIG_PRIO_HIGH;
+
 		if (p->vfo == -1) {
 			for (rx = 0; rx < (uint8_t)r->st.receivers; rx++)
 				add_named(r, prio, p->command, true, rx, false, 0);

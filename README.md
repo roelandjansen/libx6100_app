@@ -89,6 +89,7 @@ wfview main is the reference for protocol, timing and behaviour. Where this clie
 2. Link loss after 15 s without a packet on the control stream, or on the CI-V stream once open (wfview's own server value), or when the radio closes a stream. Audio alone does not keep the link: an IC-7851 dropped control and CI-V and went on sending audio. PTT is released locally.
 9. Disconnect: the sockets stay open up to 1 s after the shutdown, the radio's retransmit requests are answered and the disconnect goes out 3 times on each stream; the token is removed whenever the login took, also without streams. wfview sends all once and closes, which left an IC-7851 holding the session for about 90 s.
 10. A radio busy without another client (our own earlier session still closing) is logged out of and into again, at least 1 s apart, up to 10 times.
+11. RX Mode is polled at High at the least (the rig files have Medium): a mode, DATA or filter change made on the rig, or on the sub, showed only after several seconds. And a change of the active receiver (VFO Main/Sub Band) asks both receivers' frequency and mode at once.
 3. An unknown model is a hard error.
 4. "Radio not responding!" is shown after 20 are-you-there attempts.
 5. AGC Status is read at start-up and after each set.
