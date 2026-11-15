@@ -24,6 +24,7 @@ Status: working on Android and the Linux desktop against an X6100 (wfserver) and
 - Controls: frequency (keypad entry, checked against the rig file bands), tuning step, mode, filter, AGC, preamp, attenuator, scope span and mode, frequency lock, volume.
 - Only the controls the rig file defines are shown. AGC names follow the rig: Icom FAST / MID / SLOW, X6100 FAST / AUTO / SLOW.
 - TX: hold-to-talk PTT, the ATU button with the rig's tuner state (ATU ? not known yet, ATU OFF, ATU ON green, TUNING amber; short press: in / out, also without TX; long press: a tune cycle), PTT time-out (as wfview, 30–999 s). RX audio is muted on the phone while keyed.
+- The rig on / off: tap the rig name at the top, Power on or Power off (asks again). Works from standby when the rig keeps its LAN alive (its power on over LAN setting); CI-V 18 01 / 18 00 to the address from the login, as wfview does. Native console: `power on|off`.
 - PTT safety guards:
   - PTT is released on finger up, on a lost press, on app pause or loss of the window, on a lost microphone, on link loss, on disconnect, and on a missing UI heartbeat.
   - When the app disconnects while keyed, PTT off is sent straight to the rig.

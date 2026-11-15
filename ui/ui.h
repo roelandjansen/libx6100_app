@@ -58,6 +58,11 @@ struct ui_ops {
 	int (*ptt)(void *ctx, int on);
 	int (*ptt_heartbeat)(void *ctx);
 	int (*atu_tune)(void *ctx);
+
+	//
+	// The rig on / off (CI-V 18 01 / 18 00; also in standby, when the rig keeps its LAN)
+	//
+	int (*power)(void *ctx, int on);
 };
 
 //

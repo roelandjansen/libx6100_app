@@ -374,6 +374,39 @@ static const char *agc_name(int v)
 	return buf;
 }
 
+//
+// The rig on / off (2026-11-15): a tap on the rig name at the top; off asks again. Works
+// in standby only when the rig keeps its LAN alive (its power on over LAN setting)
+//
+
+static void on_power_off_sure(int idx, void *ud)
+{
+	(void)ud;
+	if (idx == 1 && G.ops.power != NULL)
+		G.ops.power(G.ops.ctx, 0);
+}
+
+static void on_power_chosen(int idx, void *ud)
+{
+	static const char *const C_SURE[] = { "No", "Yes, power off" };
+
+	(void)ud;
+	if (G.ops.power == NULL)
+		return;
+	if (idx == 0)
+		G.ops.power(G.ops.ctx, 1);
+	else if (idx == 1)
+		ui_chooser_open("Power off the rig?", C_SURE, 2, 0, on_power_off_sure, NULL);
+}
+
+static void on_model(lv_event_t *e)
+{
+	static const char *const C_POWER[] = { "Power on", "Power off" };
+
+	(void)e;
+	ui_chooser_open("Rig", C_POWER, 2, -1, on_power_chosen, NULL);
+}
+
 static void on_agc_chosen(int idx, void *ud)
 {
 	(void)ud;
@@ -593,7 +626,7 @@ static void build_status(lv_obj_t *scr)
 	lv_obj_align(G.l_rxtx, LV_ALIGN_LEFT_MID, U(8), 0);
 	G.l_vfo = label(r, G.f_small, C_TEXT, "VFO A");
 	lv_obj_align(G.l_vfo, LV_ALIGN_LEFT_MID, U(52), 0);
-	G.l_model = label(r, G.f_small, C_DIM, "");
+	G.l_model = tap_label(r, G.f_small, C_DIM, "", on_model);	/* tap: the rig on / off */
 	lv_obj_align(G.l_model, LV_ALIGN_CENTER, 0, 0);
 	G.l_link = label(r, G.f_small, C_DIM, "");
 	lv_obj_align(G.l_link, LV_ALIGN_RIGHT_MID, -U(8), 0);
