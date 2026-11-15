@@ -87,6 +87,7 @@ public class ProfileActivity extends Activity {
 		int pttTimeout = 300;
 		boolean micBt;			/* the mic: false the phone, true a Bluetooth headset */
 		int micGain = 100;		/* %, 100-400 */
+		boolean lanMod = true;		/* the rig's DATA OFF MOD to LAN while connected, back after */
 	}
 
 	//
@@ -104,6 +105,7 @@ public class ProfileActivity extends Activity {
 	private static final int MAX_CONNS = 16;
 	private static final String NEW_ENTRY = "(new connection)";
 	private static final String[] MIC_NAMES = { "Phone", "Bluetooth headset" };
+	private static final String[] LANMOD_NAMES = { "LAN while connected (set back after)", "Leave as it is" };
 
 	private SharedPreferences prefs;
 	private SharedPreferences store;
@@ -120,6 +122,7 @@ public class ProfileActivity extends Activity {
 	private EditText pttTimeout;
 	private Spinner micSrc;
 	private EditText micGain;
+	private Spinner lanMod;
 	private Spinner rxCodec;
 	private Spinner rxRate;
 	private Spinner txCodec;
@@ -201,6 +204,7 @@ public class ProfileActivity extends Activity {
 		c.pttTimeout = prefs.getInt("ptt_timeout", 300);
 		c.micBt = prefs.getBoolean("mic_bt", false);
 		c.micGain = prefs.getInt("mic_gain", 100);
+		c.lanMod = prefs.getBoolean("lan_mod", true);
 		return c;
 	}
 
@@ -228,6 +232,7 @@ public class ProfileActivity extends Activity {
 			c.pttTimeout = store.getInt("ptt_timeout_" + i, 300);
 			c.micBt = store.getBoolean("mic_bt_" + i, false);
 			c.micGain = store.getInt("mic_gain_" + i, 100);
+			c.lanMod = store.getBoolean("lan_mod_" + i, true);
 			conns.add(c);
 		}
 	}
@@ -251,7 +256,8 @@ public class ProfileActivity extends Activity {
 				.putInt("tx_rate_" + i, c.txRate)
 				.putInt("ptt_timeout_" + i, c.pttTimeout)
 				.putBoolean("mic_bt_" + i, c.micBt)
-				.putInt("mic_gain_" + i, c.micGain);
+				.putInt("mic_gain_" + i, c.micGain)
+				.putBoolean("lan_mod_" + i, c.lanMod);
 		}
 		ed.apply();
 	}
@@ -281,6 +287,7 @@ public class ProfileActivity extends Activity {
 		pttTimeout.setText(Integer.toString(c.pttTimeout));
 		micSrc.setSelection(c.micBt ? 1 : 0);
 		micGain.setText(Integer.toString(c.micGain));
+		lanMod.setSelection(c.lanMod ? 0 : 1);
 	}
 
 	private Conn read() {
@@ -301,6 +308,7 @@ public class ProfileActivity extends Activity {
 		c.pttTimeout = parse(pttTimeout, 300);
 		c.micBt = micSrc.getSelectedItemPosition() == 1;
 		c.micGain = Math.max(100, Math.min(400, parse(micGain, 100)));
+		c.lanMod = lanMod.getSelectedItemPosition() == 0;
 		return c;
 	}
 
@@ -377,6 +385,7 @@ public class ProfileActivity extends Activity {
 		pttTimeout = field("PTT timeout (s, 0 = off, 30-999)", "", number);
 		micSrc = choice("Microphone", MIC_NAMES, 0);
 		micGain = field("Mic gain (%, 100-400)", "", number);
+		lanMod = choice("Rig mic input (DATA OFF MOD)", LANMOD_NAMES, 0);
 
 		Button connect = new Button(this);
 		connect.setText("Connect");
@@ -479,6 +488,7 @@ public class ProfileActivity extends Activity {
 			.putInt("ptt_timeout", c.pttTimeout)
 			.putBoolean("mic_bt", c.micBt)
 			.putInt("mic_gain", c.micGain)
+			.putBoolean("lan_mod", c.lanMod)
 			.apply();
 	}
 

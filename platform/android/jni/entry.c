@@ -43,7 +43,7 @@ static void copy_jstring(JNIEnv *env, jstring js, char *out, size_t size)
 JNIEXPORT void JNICALL Java_nl_pa3met_libx6100app_RadioActivity_nativeSetProfile(JNIEnv *env, jclass cls,
 		jstring host, jint port, jstring user, jstring pass, jstring name,
 		jint rx_codec, jint rx_rate, jint latency, jint tx_codec, jint tx_rate,
-		jstring rig_dir, jboolean mic, jint ptt_timeout_s, jboolean bt_mic, jint mic_gain)
+		jstring rig_dir, jboolean mic, jint ptt_timeout_s, jboolean bt_mic, jint mic_gain, jboolean lan_mod)
 {
 	struct profile p;
 
@@ -66,6 +66,8 @@ JNIEXPORT void JNICALL Java_nl_pa3met_libx6100app_RadioActivity_nativeSetProfile
 	p.ptt_timeout_s = ptt_timeout_s > 0 ? ptt_timeout_s : 300;
 	// Mic gain from the connect page (2026-11-15; was 100 always), 100-400 %
 	p.mic_gain = (unsigned int)(mic_gain < 100 ? 100 : mic_gain > 400 ? 400 : mic_gain);
+	// The rig's DATA OFF MOD to LAN while connected (the connect page; only with a mic)
+	p.lan_mod = lan_mod != JNI_FALSE && mic != JNI_FALSE;
 	app_set_profile(&p, mic != JNI_FALSE, bt_mic != JNI_FALSE);
 }
 

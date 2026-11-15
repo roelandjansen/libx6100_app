@@ -64,6 +64,14 @@ struct profile {
 	int ptt_timeout_s;
 	int ptt_heartbeat_ms;
 	unsigned int mic_gain;
+
+	//
+	// The rig's DATA OFF MOD input to LAN while connected (2026-11-15, as x6100_trx
+	// --remote-tx-dummy): asked once the rig file is in, set to the rig file's LAN
+	// input, the old value sent back at the disconnect. Without it a rig left on MIC
+	// takes hardly any of the LAN audio
+	//
+	bool lan_mod;
 };
 
 enum session_state {

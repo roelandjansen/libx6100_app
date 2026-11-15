@@ -40,7 +40,7 @@ public class RadioActivity extends NativeActivity {
 
 	private static native void nativeSetProfile(String host, int port, String user, String pass, String name,
 			int rxCodec, int rxRate, int latency, int txCodec, int txRate, String rigDir, boolean mic,
-			int pttTimeout, boolean btMic, int micGain);
+			int pttTimeout, boolean btMic, int micGain, boolean lanMod);
 
 	private boolean btRouted;
 
@@ -140,7 +140,7 @@ public class RadioActivity extends NativeActivity {
 				p.getString("pass", ""), p.getString("name", "android"), p.getInt("rx_codec", 0x04),
 				p.getInt("rx_rate", 48000), p.getInt("latency", 150), p.getInt("tx_codec", 0x04),
 				p.getInt("tx_rate", 48000), copyRigs(), mic, p.getInt("ptt_timeout", 300),
-				btRouted, p.getInt("mic_gain", 100));
+				btRouted, p.getInt("mic_gain", 100), p.getBoolean("lan_mod", true));
 
 		Intent svc = new Intent(this, RadioService.class);
 		svc.putExtra(RadioService.EXTRA_MIC, mic);

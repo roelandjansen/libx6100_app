@@ -45,6 +45,8 @@ struct fake_server {
 	int reject_login;
 	int got_id_query;
 	int busy_logins;	/* answer "busy, our own name" to this many logins */
+	int mod_value;		/* the rig's DATA OFF MOD (X6100.rig: 0 MIC, 3 LAN) */
+	int mod_sets;		/* sets of it received */
 };
 
 static int srv_socket(uint16_t *port)
@@ -152,6 +154,23 @@ static void srv_handle_stream(struct fake_server *f, int i, const uint8_t *b, si
 		f->got_stream_disc[i]++;
 	} else if (i == 1 && len == PROTO_OPENCLOSE_SIZE && b[0x15] == 0x04) {
 		f->civ_open = 1;
+	} else if (i == 1 && len >= 0x15 + 9 && b[0x10] == 0xc1 && b[0x15 + 4] == 0x1a && b[0x15 + 5] == 0x05 &&
+			b[0x15 + 6] == 0x01 && b[0x15 + 7] == 0x18) {
+		// DATA OFF MOD (Data Off Mod Input, 1A 05 01 18): a set has a value byte, an ask not
+		static uint8_t a[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x1a, 0x05, 0x01, 0x18, 0x00, 0xfd };
+		uint8_t q[0x15 + sizeof(a)];
+
+		if (b[0x15 + 8] != 0xfd) {
+			f->mod_value = (b[0x15 + 8] >> 4) * 10 + (b[0x15 + 8] & 0x0f);
+			f->mod_sets++;
+		} else {
+			a[8] = (uint8_t)((f->mod_value / 10) << 4 | f->mod_value % 10);
+			srv_hdr(q, sizeof(q), 0);
+			q[0x10] = 0xc1;
+			proto_put_le16(q + 0x11, sizeof(a));
+			memcpy(q + 0x15, a, sizeof(a));
+			srv_send(f, 1, q, sizeof(q), 1);
+		}
 	} else if (i == 1 && len >= 0x15 + 7 && b[0x10] == 0xc1 && b[0x15 + 4] == 0x19 && b[0x15 + 5] == 0x00) {
 		// Transceiver ID query on CI-V: answer as an X6100
 		static const uint8_t C_ID[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
@@ -246,6 +265,7 @@ int main(void)
 	p.rx_latency = 150;
 	p.dev_rate = 48000;
 	snprintf(p.rig_dir, sizeof(p.rig_dir), "%s", "rigs");
+	p.lan_mod = true;
 
 	CHECK(session_connect(&s, &p, NULL) == 0);
 
@@ -295,6 +315,15 @@ int main(void)
 		CHECK(info.rx_codec == 0x04);
 	}
 
+	// DATA OFF MOD (p.lan_mod): MIC on the rig, LAN once the rig file is in
+	until = clock_mono_ms() + 5000;
+	while (clock_mono_ms() < until && f.mod_sets == 0) {
+		srv_poll(&f, 20);
+		srv_send_data(&f);
+	}
+	CHECK(f.mod_sets == 1);
+	CHECK(f.mod_value == 3);
+
 	session_disconnect(s);
 
 	// Collect the disconnect packets: the token back, and 0x05 three times on each stream
@@ -306,6 +335,9 @@ int main(void)
 	CHECK(f.got_disconnect == 3);
 	CHECK(f.got_stream_disc[1] == 3);
 	CHECK(f.got_stream_disc[2] == 3);
+	CHECK(f.mod_sets == 2);
+	CHECK(f.mod_value == 0);	/* MIC back on the rig */
+	p.lan_mod = false;
 
 	// The rig closes control: the session must end as lost, with the reason in the status
 	f.civ_open = 0;

@@ -93,6 +93,18 @@ struct session {
 	int64_t t_streams_open;
 	int peer_closed;	/* 1 + stream (0 control, 1 CI-V, 2 audio): the rig sent a disconnect */
 	int busy_retries;	/* logins again after "busy" without another client */
+
+	//
+	// DATA OFF MOD to LAN while connected (prof.lan_mod; lanmod_*)
+	//
+	int lm_state;		/* LM_* */
+	int lm_reg;		/* the rig file's LAN input value */
+	int lm_old;		/* the rig's own value, sent back at the disconnect */
+	int lm_tries;
+	int64_t lm_ask_ms;
+	atomic_int lm_seen;	/* the rig's answer, -1 none yet */
+	uint8_t lm_cmd[8];
+	size_t lm_cmd_n;
 	unsigned int rand_state;
 
 	//
@@ -447,10 +459,13 @@ static void rig_error(void *ctx, const char *msg)
 	s->stop = 1;
 }
 
+static void lanmod_input(struct session *s, const uint8_t *civ, size_t len);
+
 static void on_civ_data(void *ctx, const uint8_t *civ, size_t len)
 {
 	struct session *s = ctx;
 
+	lanmod_input(s, civ, len);
 	if (s->rig_active)
 		rig_input(&s->rig, civ, len, clock_mono_ms());
 
@@ -712,6 +727,168 @@ static void linger(struct session *s, bool had_streams)
 }
 
 //
+// The rig's DATA OFF MOD input to LAN while connected (prof.lan_mod, 2026-11-15; as
+// x6100_trx tools/x6100_remote.c lanmod_*, which does it for --remote-tx-dummy). Once
+// the rig file is in: asked (Data Off Mod Input), set to the rig file's LAN input when
+// it is not already, the old value sent back before the disconnect. Own frames: the
+// rig layer encodes no value of this kind. Without the command or a LAN input in the
+// rig file nothing is done. A rig left on MIC took hardly any LAN audio: about 10 W of
+// 200 on speech from the app (2026-11-15)
+//
+
+#define C_LM_TYPE	"Data Off Mod Input"
+#define C_LM_TRIES	3
+#define C_LM_ASK_MS	1500
+#define C_LM_BACK_MS	300	/* the old value on its way before the shutdown */
+
+enum { LM_IDLE, LM_ASKED, LM_SET, LM_DONE };
+
+static void drain(struct session *s, struct udp_socket *u, int which, int64_t now);
+static void flush_civq(struct session *s, int64_t now);
+
+// Network thread: the answer to the ask is FE FE E1 <rig> <command> <value> FD; a packet
+// may hold more than one frame
+static void lanmod_input(struct session *s, const uint8_t *civ, size_t len)
+{
+	const size_t n = s->lm_cmd_n;
+	size_t a;
+
+	if (n == 0 || s->lm_state != LM_ASKED)
+		return;
+
+	for (a = 0; a + 1 < len; a++) {
+		const uint8_t *f;
+		size_t e;
+
+		if (civ[a] != 0xfe || civ[a + 1] != 0xfe)
+			continue;
+		for (e = a + 2; e < len && civ[e] != 0xfd; e++)
+			;
+		if (e >= len)
+			return;
+
+		f = civ + a;
+		if (e - a + 1 == 6 + n && f[2] == RIG_CONTROLLER_ADDR && memcmp(f + 4, s->lm_cmd, n) == 0)
+			atomic_store(&s->lm_seen, (f[4 + n] >> 4) * 10 + (f[4 + n] & 0x0f));	/* BCD */
+		a = e;
+	}
+}
+
+// The ask (value < 0) or the set (one BCD byte), to the address from the login
+static int lanmod_send(struct session *s, int value)
+{
+	uint8_t f[20];
+	size_t n = 0;
+
+	if (s->ctl.civ_id == 0x00 || value > 99 || s->lm_cmd_n + 6 > sizeof(f))
+		return -1;
+
+	f[n++] = 0xfe;
+	f[n++] = 0xfe;
+	f[n++] = s->ctl.civ_id;
+	f[n++] = RIG_CONTROLLER_ADDR;
+	memcpy(f + n, s->lm_cmd, s->lm_cmd_n);
+	n += s->lm_cmd_n;
+	if (value >= 0)
+		f[n++] = (uint8_t)((value / 10) << 4 | value % 10);
+	f[n++] = 0xfd;
+	return session_civ_send(s, f, n);
+}
+
+static const char *lanmod_name(const struct rig_def *def, int reg)
+{
+	size_t i;
+
+	for (i = 0; i < def->n_inputs; i++)
+		if (def->inputs[i].reg == reg)
+			return def->inputs[i].name;
+	return "?";
+}
+
+static void lanmod_poll(struct session *s, int64_t now)
+{
+	const struct rig_def *def;
+	char msg[64];
+	int v;
+
+	if (!s->prof.lan_mod || s->lm_state == LM_SET || s->lm_state == LM_DONE ||
+			(def = session_rig_def(s)) == NULL)
+		return;
+
+	if (s->lm_state == LM_IDLE) {
+		const struct rig_cmd *c = rigfile_cmd(def, C_LM_TYPE);
+		size_t i;
+
+		s->lm_reg = -1;
+		for (i = 0; i < def->n_inputs; i++)
+			if (strcmp(def->inputs[i].name, "LAN") == 0)
+				s->lm_reg = def->inputs[i].reg;
+		if (c == NULL || !c->get || !c->set || s->lm_reg < 0 || c->n == 0 || c->n > sizeof(s->lm_cmd)) {
+			s->lm_state = LM_DONE;	/* nothing to set on this rig */
+			return;
+		}
+		memcpy(s->lm_cmd, c->bytes, c->n);
+		s->lm_cmd_n = c->n;
+		atomic_store(&s->lm_seen, -1);
+		s->lm_tries = 0;
+		s->lm_ask_ms = 0;
+		s->lm_state = LM_ASKED;
+	}
+
+	if ((v = atomic_load(&s->lm_seen)) >= 0) {
+		s->lm_old = v;
+		if (v == s->lm_reg) {
+			s->lm_state = LM_DONE;
+		} else if (lanmod_send(s, s->lm_reg) == 0) {
+			snprintf(msg, sizeof(msg), "DATA OFF MOD %s -> LAN (back at the disconnect)", lanmod_name(def, v));
+			tx_notice(s, msg);
+			s->lm_state = LM_SET;
+		} else {
+			tx_notice(s, "DATA OFF MOD could not be set to LAN");
+			s->lm_state = LM_DONE;
+		}
+		return;
+	}
+
+	if (now - s->lm_ask_ms >= C_LM_ASK_MS) {
+		if (s->lm_tries++ >= C_LM_TRIES) {
+			tx_notice(s, "DATA OFF MOD: no answer, left as it is");
+			s->lm_state = LM_DONE;
+			return;
+		}
+		lanmod_send(s, -1);
+		s->lm_ask_ms = now;
+	}
+}
+
+// Before the shutdown, with the streams still open: the rig's own value back, and the
+// link kept running a moment so it gets there (retransmits answered)
+static void lanmod_restore(struct session *s)
+{
+	int64_t now = clock_mono_ms();
+	const int64_t end = now + C_LM_BACK_MS;
+
+	if (s->lm_state != LM_SET || !s->streams_open)
+		return;
+	s->lm_state = LM_DONE;
+	if (lanmod_send(s, s->lm_old) != 0)
+		return;
+	flush_civq(s, now);
+
+	while (now < end) {
+		struct pollfd pfd[2] = { { s->u_ctl.fd, POLLIN, 0 }, { s->u_civ.fd, POLLIN, 0 } };
+
+		if (poll(pfd, 2, (int)(end - now)) < 0 && errno != EINTR)
+			break;
+		now = clock_mono_ms();
+		drain(s, &s->u_ctl, 0, now);
+		drain(s, &s->u_civ, 1, now);
+		control_tick(&s->ctl, now);
+		civ_stream_tick(&s->civ, now);
+	}
+}
+
+//
 // Datagram dispatch
 //
 
@@ -940,8 +1117,10 @@ static void *net_thread(void *arg)
 		if (s->streams_open) {
 			civ_stream_tick(&s->civ, now);
 			audio_stream_tick(&s->audio, now);
-			if (s->rig_active)
+			if (s->rig_active) {
 				rig_tick(&s->rig, now);
+				lanmod_poll(s, now);
+			}
 		}
 
 		// "Busy" without another client: our old session still closing on the rig (a
@@ -1000,6 +1179,9 @@ static void *net_thread(void *arg)
 		s->ptt = false;
 		atomic_store(&s->tx_mute, false);
 	}
+
+	// The rig's own DATA OFF MOD back while the link is up (prof.lan_mod)
+	lanmod_restore(s);
 
 	{
 		const bool had_streams = s->streams_open;
