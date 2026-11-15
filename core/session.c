@@ -35,6 +35,9 @@
 #define C_CIV_QUEUE		8192
 #define C_CTL_QUEUE		64
 #define C_TX_POLL_MS		10
+#define C_LINGER_MS		1000	/* after the shutdown, before the sockets close */
+#define C_BYE_PERIOD_MS		250	/* disconnect repeated at this period ... */
+#define C_BYE_REPEATS		3	/* ... this many times in all */
 
 struct ctl_cmd {
 	enum session_ctl_op op;
@@ -82,10 +85,11 @@ struct session {
 	bool streams_open;
 
 	//
-	// Link supervision
+	// Link supervision: per stream (control, CI-V), not on any datagram: the IC-7851
+	// dropped control and CI-V and kept sending audio, so the link looked alive
 	//
-	bool heard;
-	int64_t last_rx;
+	int64_t t_streams_open;
+	int peer_closed;	/* 1 + stream (0 control, 1 CI-V, 2 audio): the rig sent a disconnect */
 	unsigned int rand_state;
 
 	//
@@ -521,6 +525,7 @@ static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 	}
 
 	s->streams_open = true;
+	s->t_streams_open = now;
 
 	// Rig layer: Transceiver ID broadcast first, rig file from the announced model
 	{
@@ -610,6 +615,100 @@ static uint16_t ev_rand16(void *ctx)
 }
 
 //
+// Link lost: the rig closed a stream, or control (once heard) or CI-V (once open) silent
+// for C_LINK_LOSS_MS. Audio alone does not keep the link: the IC-7851 dropped control
+// and CI-V (LAN indication off, no scope) and went on sending audio (2026-11-15)
+//
+
+static bool link_lost(struct session *s, int64_t now)
+{
+	static const char *const C_STREAM[] = { "control", "CI-V", "audio" };
+	const int64_t ctl = s->ctl.s.last_rx;
+	const char *what = NULL;
+
+	if (s->peer_closed != 0) {
+		snprintf(s->ctl.status, sizeof(s->ctl.status), "Radio closed the %s stream",
+				C_STREAM[s->peer_closed - 1]);
+		return true;
+	}
+
+	if (ctl != 0 && now - ctl > C_LINK_LOSS_MS)
+		what = "control";
+	else if (s->streams_open && now - (s->civ.s.last_rx > s->t_streams_open ?
+			s->civ.s.last_rx : s->t_streams_open) > C_LINK_LOSS_MS)
+		what = "CI-V";
+
+	if (what == NULL)
+		return false;
+
+	snprintf(s->ctl.status, sizeof(s->ctl.status), "No %s from the radio", what);
+	return true;
+}
+
+//
+// After control_shutdown: up to C_LINGER_MS before the sockets close, so the rig can ask
+// for a lost close / token remove again (its retransmit requests are answered from the
+// stream's TX buffer) and the disconnect goes out C_BYE_REPEATS times on each stream.
+// Sending it all once and closing at once left the IC-7851 holding the session for
+// some 90 s, until its own timeout (2026-11-15). Ends early when the rig closes control
+//
+
+static void linger_stream(struct udp_socket *u, struct udp_stream *st, int64_t now, bool *closed)
+{
+	uint8_t buf[PROTO_MAX_PACKET];
+	ssize_t n;
+
+	while ((n = udp_socket_recv(u, buf, sizeof(buf))) > 0) {
+		if ((udp_stream_receive(st, buf, (size_t)n, now) & UDP_EV_DISCONNECT) != 0 &&
+				st->kind == UDP_STREAM_CONTROL)
+			*closed = true;
+	}
+}
+
+static void linger(struct session *s, bool had_streams)
+{
+	int64_t now = clock_mono_ms();
+	const int64_t end = now + C_LINGER_MS;
+	int64_t next = now + C_BYE_PERIOD_MS;
+	int repeats = C_BYE_REPEATS - 1;	/* the first went out with the shutdown */
+	bool closed = false;
+
+	while (!closed && now < end) {
+		struct pollfd pfd[3];
+		nfds_t n = 0;
+		const int64_t until = repeats > 0 && next < end ? next : end;
+
+		pfd[n].fd = s->u_ctl.fd;
+		pfd[n++].events = POLLIN;
+		if (had_streams) {
+			pfd[n].fd = s->u_civ.fd;
+			pfd[n++].events = POLLIN;
+			pfd[n].fd = s->u_audio.fd;
+			pfd[n++].events = POLLIN;
+		}
+		if (poll(pfd, n, (int)(until - now)) < 0 && errno != EINTR)
+			break;
+
+		now = clock_mono_ms();
+		linger_stream(&s->u_ctl, &s->ctl.s, now, &closed);
+		if (had_streams) {
+			linger_stream(&s->u_civ, &s->civ.s, now, &closed);
+			linger_stream(&s->u_audio, &s->audio.s, now, &closed);
+		}
+
+		if (repeats > 0 && now >= next) {
+			if (had_streams) {
+				udp_stream_send_control(&s->civ.s, false, PROTO_TYPE_DISCONNECT, 0, now);
+				udp_stream_send_control(&s->audio.s, false, PROTO_TYPE_DISCONNECT, 0, now);
+			}
+			udp_stream_send_control(&s->ctl.s, false, PROTO_TYPE_DISCONNECT, 0, now);
+			repeats--;
+			next = now + C_BYE_PERIOD_MS;
+		}
+	}
+}
+
+//
 // Datagram dispatch
 //
 
@@ -619,8 +718,10 @@ static void drain(struct session *s, struct udp_socket *u, int which, int64_t no
 	ssize_t n;
 
 	while ((n = udp_socket_recv(u, buf, sizeof(buf))) > 0) {
-		s->last_rx = now;
-		s->heard = true;
+		// The rig closed a stream (a bare control packet, type disconnect)
+		if (n == PROTO_CONTROL_SIZE && proto_get_le16(buf + PROTO_OFF_TYPE) == PROTO_TYPE_DISCONNECT &&
+				s->peer_closed == 0)
+			s->peer_closed = 1 + which;
 
 		if (which == 0)
 			control_receive(&s->ctl, buf, (size_t)n, now);
@@ -840,7 +941,7 @@ static void *net_thread(void *arg)
 				rig_tick(&s->rig, now);
 		}
 
-		if (s->heard && now - s->last_rx > C_LINK_LOSS_MS) {
+		if (link_lost(s, now)) {
 			// Link loss guard: PTT off locally (nothing reaches the server)
 			if (s->ptt) {
 				s->ptt = false;
@@ -863,7 +964,14 @@ static void *net_thread(void *arg)
 		atomic_store(&s->tx_mute, false);
 	}
 
-	control_shutdown(&s->ctl, clock_mono_ms());
+	{
+		const bool had_streams = s->streams_open;
+
+		control_shutdown(&s->ctl, clock_mono_ms());
+		// Linger only when the rig was heard and has not closed control itself
+		if (s->ctl.s.last_rx != 0 && s->peer_closed != 1)
+			linger(s, had_streams);
+	}
 	udp_socket_close(&s->u_civ);
 	udp_socket_close(&s->u_audio);
 	udp_socket_close(&s->u_ctl);

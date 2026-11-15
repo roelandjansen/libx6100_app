@@ -462,6 +462,7 @@ uint32_t udp_stream_receive(struct udp_stream *s, const uint8_t *buf, size_t len
 
 	type = proto_get_le16(buf + PROTO_OFF_TYPE);
 	seq = proto_get_le16(buf + PROTO_OFF_SEQ);
+	s->last_rx = now_ms;
 
 	if (len == PROTO_CONTROL_SIZE) {
 		if (type == PROTO_TYPE_RETRANSMIT && proto_get_le32(buf + PROTO_OFF_LEN) == PROTO_CONTROL_SIZE)
@@ -479,6 +480,8 @@ uint32_t udp_stream_receive(struct udp_stream *s, const uint8_t *buf, size_t len
 			ev |= UDP_EV_IAMHERE;
 		} else if (type == PROTO_TYPE_READY) {
 			ev |= UDP_EV_READY;
+		} else if (type == PROTO_TYPE_DISCONNECT) {
+			ev |= UDP_EV_DISCONNECT;
 		}
 	} else if (len == PROTO_PING_SIZE && type == PROTO_TYPE_PING) {
 		ev |= handle_ping(s, buf, now_ms);

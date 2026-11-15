@@ -36,6 +36,7 @@ enum udp_stream_kind {
 #define UDP_EV_IAMHERE		0x01u
 #define UDP_EV_READY		0x02u
 #define UDP_EV_PING		0x04u
+#define UDP_EV_DISCONNECT	0x08u	/* the peer closed this stream */
 
 struct udp_io {
 
@@ -123,6 +124,11 @@ struct udp_stream {
 	//
 	struct ping_delay ping_delay;
 	int ping_lateness_ms;
+
+	//
+	// Last datagram from the peer (monotonic ms, 0 = none yet): link loss per stream
+	//
+	int64_t last_rx;
 
 	struct udp_stream_stats stats;
 };

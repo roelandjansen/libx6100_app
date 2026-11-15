@@ -536,9 +536,14 @@ void control_shutdown(struct control *c, int64_t now_ms)
 	if (c->stream_opened) {
 		if (c->ev.close_streams != NULL)
 			c->ev.close_streams(c->ev.ctx);
-		send_token(c, TOKEN_REMOVE, now_ms);
 		c->stream_opened = false;
 	}
+
+	// The token goes back whenever the login took (wfview: only with streams open). A
+	// rig in standby gives no streams, and a token left behind held the IC-7851 for
+	// some 90 s before it took a new login (2026-11-15)
+	if (c->authenticated)
+		send_token(c, TOKEN_REMOVE, now_ms);
 
 	udp_stream_send_control(&c->s, false, PROTO_TYPE_DISCONNECT, 0, now_ms);
 	c->state = CTL_STATE_CLOSED;

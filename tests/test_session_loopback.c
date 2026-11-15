@@ -38,6 +38,8 @@ struct fake_server {
 	uint16_t seq[3];
 	int civ_open;
 	int got_disconnect;
+	int got_stream_disc[3];
+	int got_token_remove;
 	int got_login;
 	int got_request;
 	int reject_login;
@@ -101,6 +103,8 @@ static void srv_handle_control(struct fake_server *f, const uint8_t *b, size_t l
 		if (f->reject_login)
 			proto_put_le32(p + 0x30, 0xfeffffffu);
 		srv_send(f, 0, p, PROTO_LOGIN_RESPONSE_SIZE, 1);
+	} else if (len == PROTO_TOKEN_SIZE && b[0x15] == 0x01) {
+		f->got_token_remove++;
 	} else if (len == PROTO_TOKEN_SIZE && b[0x15] == 0x02) {
 		srv_hdr(p, sizeof(p), 0);
 		proto_put_le16(p + 0x40, 1);
@@ -135,6 +139,8 @@ static void srv_handle_stream(struct fake_server *f, int i, const uint8_t *b, si
 	} else if (len == PROTO_CONTROL_SIZE && type == PROTO_TYPE_READY) {
 		srv_hdr(p, PROTO_CONTROL_SIZE, PROTO_TYPE_READY);
 		srv_send(f, i, p, PROTO_CONTROL_SIZE, 0);
+	} else if (len == PROTO_CONTROL_SIZE && type == PROTO_TYPE_DISCONNECT) {
+		f->got_stream_disc[i]++;
 	} else if (i == 1 && len == PROTO_OPENCLOSE_SIZE && b[0x15] == 0x04) {
 		f->civ_open = 1;
 	} else if (i == 1 && len >= 0x15 + 7 && b[0x10] == 0xc1 && b[0x15 + 4] == 0x19 && b[0x15 + 5] == 0x00) {
@@ -282,11 +288,45 @@ int main(void)
 
 	session_disconnect(s);
 
-	// Collect the disconnect packets (control, CI-V and audio each send 0x05)
+	// Collect the disconnect packets: the token back, and 0x05 three times on each stream
+	// (the session lingers after the shutdown; the server reads its queue only now)
 	until = clock_mono_ms() + 500;
 	while (clock_mono_ms() < until)
 		srv_poll(&f, 20);
-	CHECK(f.got_disconnect >= 1);
+	CHECK(f.got_token_remove == 1);
+	CHECK(f.got_disconnect == 3);
+	CHECK(f.got_stream_disc[1] == 3);
+	CHECK(f.got_stream_disc[2] == 3);
+
+	// The rig closes control: the session must end as lost, with the reason in the status
+	f.civ_open = 0;
+	f.got_id_query = 0;
+	CHECK(session_connect(&s, &p, NULL) == 0);
+	until = clock_mono_ms() + 5000;
+	while (clock_mono_ms() < until) {
+		srv_poll(&f, 20);
+		srv_send_data(&f);
+		session_get_info(s, &info);
+		if (info.state == SESSION_CONNECTED && info.civ_frames > 5)
+			break;
+	}
+	CHECK(info.state == SESSION_CONNECTED);
+	{
+		uint8_t d[PROTO_CONTROL_SIZE];
+
+		srv_hdr(d, sizeof(d), PROTO_TYPE_DISCONNECT);
+		srv_send(&f, 0, d, sizeof(d), 0);
+	}
+	until = clock_mono_ms() + 2000;
+	while (clock_mono_ms() < until) {
+		srv_poll(&f, 20);
+		session_get_info(s, &info);
+		if (info.state == SESSION_LOST)
+			break;
+	}
+	CHECK(info.state == SESSION_LOST);
+	CHECK(strcmp(info.status, "Radio closed the control stream") == 0);
+	session_disconnect(s);
 
 	// Second run: server rejects the login; reason and wfview's text must reach the snapshot
 	f.reject_login = 1;
