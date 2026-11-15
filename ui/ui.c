@@ -384,17 +384,21 @@ static void on_sub_tap(lv_event_t *e)
 		G.ops.set_value(G.ops.ctx, "Scope Main/Sub", to);
 }
 
-// The active receiver, asked once a second on a dual watch rig (the rig file does not
-// poll it; a switch on the rig shows that way)
+// The active receiver and dual watch, asked once a second on a dual watch rig: the rig
+// file does not poll the first and polls the second at medium priority only, so a
+// switch made on the rig showed late (2026-11-15)
 static void rxsel_poll(void)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
 	const uint32_t t = lv_tick_get();
 
 	if (G.ops.get_value == NULL || !G.st.rig_valid || r == NULL || r->receivers < 2 ||
-			rigfile_cmd(r, "VFO Main/Sub Band") == NULL || (int32_t)(t - G.rxsel_next) < 0)
+			(int32_t)(t - G.rxsel_next) < 0)
 		return;
-	G.ops.get_value(G.ops.ctx, "VFO Main/Sub Band");
+	if (rigfile_cmd(r, "VFO Main/Sub Band") != NULL)
+		G.ops.get_value(G.ops.ctx, "VFO Main/Sub Band");
+	if (rigfile_cmd(r, "VFO Dual Watch") != NULL)
+		G.ops.get_value(G.ops.ctx, "VFO Dual Watch");
 	G.rxsel_next = t + 1000u;
 }
 
