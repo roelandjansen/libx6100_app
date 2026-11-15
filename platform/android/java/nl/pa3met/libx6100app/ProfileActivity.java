@@ -422,8 +422,11 @@ public class ProfileActivity extends Activity {
 
 		// The form shows the values in use; the list stands on their entry, if saved
 		cur = current();
-		fill(cur);
+		// The form from the saved entry of the connection in use, if there is one: Save
+		// wrote only the list, so after a Save and a restart the form showed the values
+		// of the last Connect under the entry's name (Bluetooth back to Phone, 2026-11-15)
 		int at = find(cur.label);
+		fill(at >= 0 ? conns.get(at) : cur);
 		showList(at >= 0 ? at : conns.size());
 
 		list.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
@@ -475,6 +478,7 @@ public class ProfileActivity extends Activity {
 
 		storeList();
 		label.setText(c.label);
+		save();		/* the values in use too: the next start and Connect take them */
 		showList(at);
 		Toast.makeText(this, "Saved: " + c.label, Toast.LENGTH_SHORT).show();
 	}
