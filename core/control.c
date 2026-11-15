@@ -367,18 +367,28 @@ static void on_conninfo(struct control *c, const uint8_t *b, int64_t now_ms)
 	for (f = 0; f < c->n_radios; f++)
 		(void)radio_matches(&c->radios[f], b);
 
-	if (!c->stream_opened && c->n_radios == 1) {
+	if (!c->stream_opened && c->n_radios != 1) {
+		// Nothing chosen: say so instead of waiting silently (2026-11-15)
+		snprintf(msg, sizeof(msg), "Radio list: %u radios, waiting", (unsigned int)c->n_radios);
+		set_status(c, msg);
+	} else if (!c->stream_opened) {
 		if (busy != 0) {
 			if (proto_get_le32(ip) != 0 && strcmp(computer, comp_name) != 0) {
 				snprintf(msg, sizeof(msg), "%s in use by: %s (%u.%u.%u.%u)",
-						c->dev_name, computer, ip[0], ip[1], ip[2], ip[3]);
+						c->radios[0].name, computer, ip[0], ip[1], ip[2], ip[3]);
 				set_status(c, msg);
 				c->reason = CTL_REASON_IN_USE;
 				udp_stream_send_control(&c->s, false, PROTO_TYPE_IDLE,
 						proto_get_le16(b + PROTO_OFF_SEQ), now_ms);
+			} else {
+				// Busy without another client: our own earlier session not yet
+				// released, or the rig itself; the token renewal asks again
+				snprintf(msg, sizeof(msg), "%s busy (%s), waiting", c->radios[0].name,
+						computer[0] != '\0' ? computer : "no client");
+				set_status(c, msg);
 			}
 		} else {
-			snprintf(msg, sizeof(msg), "%s available", c->dev_name);
+			snprintf(msg, sizeof(msg), "%s available", c->radios[0].name);
 			set_status(c, msg);
 			set_current_radio(c, 0, now_ms);
 		}
@@ -413,6 +423,14 @@ static void on_capabilities(struct control *c, const uint8_t *b, size_t len)
 		r->baudrate = proto_get_be32(e + OFF_RCAP_BAUDRATE);
 		r->capf = proto_get_le16(e + OFF_RCAP_CAPF);
 		r->capg = proto_get_le16(e + OFF_RCAP_CAPG);
+	}
+
+	// Shown until the rig's connection info (available / busy) follows
+	if (c->n_radios > 0 && !c->stream_opened) {
+		char msg[CONTROL_STATUS_LEN];
+
+		snprintf(msg, sizeof(msg), "Radio list: %s, waiting for it", c->radios[0].name);
+		set_status(c, msg);
 	}
 }
 
