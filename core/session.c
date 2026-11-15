@@ -527,6 +527,14 @@ static void ev_open_streams(void *ctx, uint16_t civ_port, uint16_t audio_port)
 		const struct rig_events rev = { rig_send, rig_changed, rig_error, s };
 
 		rig_init(&s->rig, s->prof.rig_dir, s->ctl.baudrate, s->prof.poll_ms, &rev, now);
+
+		// The CI-V address the rig gave at login: the ID query goes there, not to all
+		// (00). The IC-7851 often left the broadcast unanswered, after a power on above
+		// all: no rig file came and the app waited for ever (2026-11-15; x6100_trx had
+		// added a query of its own to that address, 2026-11-12)
+		if (s->ctl.civ_id != 0x00)
+			s->rig.civ_addr = s->ctl.civ_id;
+
 		s->rig_active = true;
 	}
 	set_state(s, SESSION_CONNECTED, SESSION_REASON_NONE);
