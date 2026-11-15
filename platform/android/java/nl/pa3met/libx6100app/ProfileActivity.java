@@ -105,7 +105,7 @@ public class ProfileActivity extends Activity {
 	private static final int MAX_CONNS = 16;
 	private static final String NEW_ENTRY = "(new connection)";
 	private static final String[] MIC_NAMES = { "Phone", "Bluetooth headset" };
-	private static final String[] LANMOD_NAMES = { "LAN while connected (set back after)", "Leave as it is" };
+	private static final String[] LANMOD_NAMES = { "LAN while connected", "Leave as it is" };
 
 	private SharedPreferences prefs;
 	private SharedPreferences store;
@@ -143,8 +143,10 @@ public class ProfileActivity extends Activity {
 
 		caption(label);
 		e.setText(value);
-		e.setInputType(type);
+		// Single line first: setSingleLine() after setInputType() undoes the password
+		// masking (the password was shown in clear, 2026-11-15)
 		e.setSingleLine(true);
+		e.setInputType(type);
 		form.addView(e);
 		return e;
 	}
@@ -386,11 +388,6 @@ public class ProfileActivity extends Activity {
 		micSrc = choice("Microphone", MIC_NAMES, 0);
 		micGain = field("Mic gain (%, 100-400)", "", number);
 		lanMod = choice("Rig mic input (DATA OFF MOD)", LANMOD_NAMES, 0);
-
-		Button connect = new Button(this);
-		connect.setText("Connect");
-		connect.setOnClickListener(v -> connect());
-		form.addView(connect);
 
 		// The form shows the values in use; the list stands on their entry, if saved
 		cur = current();
