@@ -23,7 +23,6 @@
 
 #include <SDL.h>
 
-#include "core/rig.h"	/* RIG_CONTROLLER_ADDR: power on / off */
 #include "core/session.h"
 #include "platform/native/audio_sdl.h"
 
@@ -232,19 +231,13 @@ static void handle_command(struct session *s, char *line)
 	} else if (strcmp(cmd, "tune") == 0) {
 		report(cmd, tx_tune(s));
 	} else if (strcmp(cmd, "power") == 0) {
-		// The rig on / off: CI-V 18 01 / 18 00 as a frame of our own (also in standby,
-		// without a rig file), to the address the rig gave at login
-		struct session_info pi;
+		// The rig on / off (session_power: also in standby, the FE run for power on)
 		const int on = strcmp(rest, "on") == 0 ? 1 : strcmp(rest, "off") == 0 ? 0 : -1;
 
-		session_get_info(s, &pi);
-		if (on < 0 || pi.civ_addr == 0x00) {
-			printf("power on|off (needs the rig's CI-V address from the login)\n");
-		} else {
-			const uint8_t f[] = { 0xfe, 0xfe, pi.civ_addr, RIG_CONTROLLER_ADDR, 0x18, (uint8_t)on, 0xfd };
-
-			report(cmd, session_civ_send(s, f, sizeof(f)));
-		}
+		if (on < 0)
+			printf("power on|off\n");
+		else
+			report(cmd, session_power(s, on));
 	} else if (strcmp(cmd, "atu") == 0) {
 		// The rig's tuner in / out (Tuner/ATU Status 1 / 0; no transmission), then read
 		// back so the state follows

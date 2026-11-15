@@ -5,8 +5,6 @@
 
 #include "ui/ui.h"
 
-#include "core/rig.h"	/* RIG_CONTROLLER_ADDR, for the power frame */
-
 static void op_get_state(void *ctx, struct radio_state *out)
 {
 	session_get_state(ctx, out);
@@ -97,25 +95,10 @@ static int op_get_value(void *ctx, const char *type)
 	return session_get_value(ctx, type, 0);
 }
 
-// CI-V 18 01 / 18 00 to the address the rig gave at login, as a frame of our own (as
-// wfview's powerOn / powerOff over the network, no FE preamble): in standby the rig
-// answers no ID, so no rig file is loaded and a named set would be refused
+// The rig on / off (session_power: with the FE run for power on, as wfview)
 static int op_power(void *ctx, int on)
 {
-	struct session_info info;
-	uint8_t f[7];
-
-	session_get_info(ctx, &info);
-	if (info.civ_addr == 0x00)
-		return -1;
-	f[0] = 0xfe;
-	f[1] = 0xfe;
-	f[2] = info.civ_addr;
-	f[3] = RIG_CONTROLLER_ADDR;
-	f[4] = 0x18;
-	f[5] = on ? 0x01 : 0x00;
-	f[6] = 0xfd;
-	return session_civ_send(ctx, f, sizeof(f));
+	return session_power(ctx, on);
 }
 
 void ui_ops_from_session(struct ui_ops *ops, struct session *s)

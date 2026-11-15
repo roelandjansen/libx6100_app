@@ -189,6 +189,10 @@ const char *control_state_name(enum control_state st);
 
 int session_civ_send(struct session *s, const uint8_t *civ, size_t len);
 
+// The rig on / off: CI-V 18 01 (after a run of FE, as wfview) / 18 00 to the address from
+// the login, also in standby (no rig file needed); 0 queued
+int session_power(struct session *s, int on);
+
 //
 // RX audio (device callback / any thread)
 //

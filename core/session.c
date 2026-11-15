@@ -1000,6 +1000,43 @@ int session_civ_send(struct session *s, const uint8_t *civ, size_t len)
 }
 
 //
+// The rig on / off: CI-V 18 01 / 18 00 to the address the rig gave at login, as a frame
+// of its own (in standby the rig answers no ID, so no rig file is loaded and a named set
+// would be refused). Power on with a run of FE first, as wfview's powerOn: it leaves the
+// run out only when the rig file says the rig has LAN, and in standby there is none
+// loaded, so over the network too it sends 150 at 115200 baud (fewer at lower rates);
+// without them the IC-7851 stayed in standby (2026-11-15). Off as wfview: the frame only
+//
+
+int session_power(struct session *s, int on)
+{
+	struct session_info info;
+	uint8_t f[160];
+	size_t n = 0;
+	size_t fe = 0;
+
+	session_get_info(s, &info);
+	if (info.civ_addr == 0x00)
+		return -1;
+
+	if (on) {
+		fe = info.baudrate == 57600 ? 75 : info.baudrate == 38400 ? 50 : info.baudrate == 19200 ? 25
+			: info.baudrate == 9600 ? 13 : info.baudrate == 4800 ? 7 : 150;
+		while (n < fe)
+			f[n++] = 0xfe;
+	}
+
+	f[n++] = 0xfe;
+	f[n++] = 0xfe;
+	f[n++] = info.civ_addr;
+	f[n++] = RIG_CONTROLLER_ADDR;
+	f[n++] = 0x18;
+	f[n++] = on ? 0x01 : 0x00;
+	f[n++] = 0xfd;
+	return session_civ_send(s, f, n);
+}
+
+//
 // Device callback: fill frames stereo floats (silence without a pipeline).
 // The platform must stop its device before session_disconnect().
 //
