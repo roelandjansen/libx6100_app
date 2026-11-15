@@ -531,6 +531,15 @@ static void atu_watch(bool tune)
 	G.atu_tune = tune;
 }
 
+// The rig file is in and has no tuner (IC-9700, 2026-11-15): no ATU button, no polling.
+// Before the rig file the button stays as ATU ?
+static bool rig_no_tuner(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+
+	return r != NULL && rigfile_cmd(r, "Tuner/ATU Status") == NULL;
+}
+
 // Also without a press (the TUNER key on the rig, a tune started there; Icom does not
 // announce the tuner as it does the frequency): asked once a second, every 0.5 s while
 // the rig reports TUNING. One small CI-V query a second, next to the scope and audio
@@ -539,7 +548,7 @@ static void atu_poll(void)
 	const uint32_t t = lv_tick_get();
 	uint32_t every = 1000u;
 
-	if (G.ops.get_value == NULL || !G.st.rig_valid)
+	if (G.ops.get_value == NULL || !G.st.rig_valid || rig_no_tuner())
 		return;
 
 	if (G.atu_until != 0 && ((uint32_t)(t - G.atu_from) >= 30000u || (int32_t)(t - G.atu_until) >= 0
@@ -936,6 +945,10 @@ static void update_lines(void)
 
 		lv_obj_set_style_bg_color(G.b_tune, lv_color_hex(tu == 2 ? 0x8d6e1f : tu == 1 ? 0x1f5d3a : 0x263241), 0);
 		set_text_if(G.l_tune, tu == 2 ? "TUNING" : tu == 1 ? "ATU ON" : tu == 0 ? "ATU OFF" : "ATU ?");
+		if (rig_no_tuner())
+			lv_obj_add_flag(G.b_tune, LV_OBJ_FLAG_HIDDEN);
+		else
+			lv_obj_remove_flag(G.b_tune, LV_OBJ_FLAG_HIDDEN);
 	}
 	lv_obj_set_style_bg_color(G.b_ptt, lv_color_hex(G.info.ptt ? C_RED : 0x3a2328), 0);
 	if (G.info.ptt && G.info.ptt_remaining_s > 0 && G.info.ptt_remaining_s <= 30)
