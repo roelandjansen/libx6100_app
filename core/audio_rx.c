@@ -15,6 +15,13 @@
 
 #define C_RING_MASK	(AUDIO_RX_RING_FRAMES - 1)
 
+// Two channels: the right one counts as silent below -80 dBFS (a single receiver sends
+// silence there; a sub receiver's noise lies far above), left on both after it has been
+// silent this long; the change is faded over C_FILL_FADE_MS (2026-11-15)
+#define C_R_SILENT	1e-4f
+#define C_R_QUIET_MS	300u
+#define C_FILL_FADE_MS	20u
+
 static size_t ring_fill(const struct audio_rx *a)
 {
 	return atomic_load_explicit(&a->head, memory_order_acquire) -
@@ -85,6 +92,10 @@ int audio_rx_configure(struct audio_rx *a, uint8_t codec, uint32_t rx_rate, uint
 		a->target_frames = AUDIO_RX_RING_FRAMES;
 	a->last_write_ms = 0;
 	memset(&a->st, 0, sizeof(a->st));
+	// Start as a single receiver (left on both); a sub heard on the right ends it
+	a->rx_rate = rx_rate;
+	a->r_quiet = rx_rate;
+	a->fill = 1.0f;
 
 	ring_write(a, NULL, a->target_frames / 2);
 	atomic_store(&a->underrun, false);
@@ -148,16 +159,46 @@ void audio_rx_push(struct audio_rx *a, const uint8_t *payload, size_t len, int64
 	a->st.peak = peak;
 	a->st.rms = (float)sqrt(sq / (double)(frames * (size_t)ch));
 
-	// Volume, then channel conversion to stereo
-	for (i = 0; i < frames; i++) {
-		if (ch == 1) {
-			const float v = a->decoded[i] * gain;
+	// Two channels: main left, sub right (Icom). A right channel silent for C_R_QUIET_MS
+	// is a single receiver: left on both. Anything on the right ends it at once
+	// (2026-11-15: a single RX was heard on the left only, dual watch was fine)
+	if (ch == 2) {
+		float rpk = 0.0f;
 
-			a->stereo[i * 2] = v;
-			a->stereo[i * 2 + 1] = v;
-		} else {
-			a->stereo[i * 2] = a->decoded[i * 2] * gain;
-			a->stereo[i * 2 + 1] = a->decoded[i * 2 + 1] * gain;
+		for (i = 0; i < frames; i++) {
+			const float v = fabsf(a->decoded[i * 2 + 1]);
+
+			if (v > rpk)
+				rpk = v;
+		}
+		if (rpk >= C_R_SILENT)
+			a->r_quiet = 0;
+		else if (a->r_quiet < a->rx_rate)
+			a->r_quiet += (uint32_t)frames;
+	}
+
+	// Volume, then channel conversion to stereo
+	{
+		const float target = a->r_quiet >= a->rx_rate / 1000u * C_R_QUIET_MS ? 1.0f : 0.0f;
+		const float step = 1000.0f / ((float)a->rx_rate * (float)C_FILL_FADE_MS);
+
+		for (i = 0; i < frames; i++) {
+			if (ch == 1) {
+				const float v = a->decoded[i] * gain;
+
+				a->stereo[i * 2] = v;
+				a->stereo[i * 2 + 1] = v;
+			} else {
+				const float l = a->decoded[i * 2] * gain;
+				const float r = a->decoded[i * 2 + 1] * gain;
+
+				if (a->fill < target)
+					a->fill = a->fill + step > target ? target : a->fill + step;
+				else if (a->fill > target)
+					a->fill = a->fill - step < target ? target : a->fill - step;
+				a->stereo[i * 2] = l;
+				a->stereo[i * 2 + 1] = r + (l - r) * a->fill;
+			}
 		}
 	}
 

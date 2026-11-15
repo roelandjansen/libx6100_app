@@ -16,7 +16,7 @@ Status: working on Android and the Linux desktop against an X6100 (wfserver) and
 - Connects to a wfview server or an Icom LAN radio over UDP: host name or IPv4, control port, username, password. The CI-V and audio ports are taken from the radio's announcement.
 - Android: up to 16 saved connections on the connect page. Pick one to fill the form; Save keeps the form under its name (the same name replaces, a new one adds), Delete removes the picked one. The single profile from before becomes the first entry, named after its host.
 - The rig is identified from its Transceiver ID reply and matched to the wfview `.rig` file with the same CI-V address. An unknown model is a hard error.
-- RX audio: LPCM 8/16 bit, µ-law, ADPCM and Opus, mono or stereo. Mono rigs play on both channels.
+- RX audio: LPCM 8/16 bit, µ-law, ADPCM and Opus, mono or stereo. Mono rigs play on both channels. Stereo (Icom: main left, sub right): with dual watch main left and sub right; with a single receiver (right channel silent for 0.3 s) main on both.
 - TX audio: Opus, PCM16, PCM8, µ-law and ADPCM (mono), from the phone or desktop microphone.
 - Spectrum and waterfall from the radio's scope data:
   - tap to tune to a point, drag sideways to tune by steps

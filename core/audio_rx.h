@@ -48,6 +48,14 @@ struct audio_rx {
 	uint16_t latency_ms;
 	size_t target_frames;
 	int64_t last_write_ms;
+
+	//
+	// Two channels (Icom: main left, sub right): a right channel silent for a while (a
+	// single receiver) gets the left one too, so a single RX is heard on both sides
+	//
+	uint32_t rx_rate;
+	uint32_t r_quiet;		// frames the right channel has been silent
+	float fill;			// 0 left / right as received .. 1 left on both, ramped
 	float decoded[AUDIO_DECODE_MAX_FRAMES * 2];
 	float stereo[AUDIO_DECODE_MAX_FRAMES * 2];
 	float resampled[AUDIO_DECODE_MAX_FRAMES * 2 * 8];

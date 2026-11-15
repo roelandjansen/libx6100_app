@@ -292,6 +292,57 @@ static void test_output_buffer(void)
 	audio_rx_stop(&a);
 }
 
+//
+// Two channels: a silent right channel (single receiver) gets the left one; a sub on the
+// right is played as received; silent again for 300 ms: left on both again
+//
+
+static void push_read(struct audio_rx *a, int16_t l, int16_t r, int packets, float *out)
+{
+	uint8_t pkt[960 * 4];
+	int p;
+	size_t i;
+
+	for (i = 0; i < 960; i++) {
+		pkt[i * 4] = (uint8_t)(l & 0xff);
+		pkt[i * 4 + 1] = (uint8_t)((uint16_t)l >> 8);
+		pkt[i * 4 + 2] = (uint8_t)(r & 0xff);
+		pkt[i * 4 + 3] = (uint8_t)((uint16_t)r >> 8);
+	}
+	for (p = 0; p < packets; p++) {
+		audio_rx_push(a, pkt, sizeof(pkt), 1000, 1000);
+		audio_rx_read(a, out, 960);
+	}
+}
+
+static void test_two_channels(void)
+{
+	static struct audio_rx a;
+	static float out[24000 * 2];
+
+	audio_rx_init(&a, 48000);
+	CHECK(audio_rx_configure(&a, AUDIO_CODEC_PCM16_2, 48000, 500) == 0);
+	audio_rx_read(&a, out, 12000);		/* the pre-fill */
+
+	// Main only: left on both from the start
+	push_read(&a, 0x4000, 0, 1, out);
+	CHECK(near(out[500 * 2], 0.5, 1e-3));
+	CHECK(out[500 * 2 + 1] == out[500 * 2]);
+
+	// A sub on the right: as received after the 20 ms fade
+	push_read(&a, 0x4000, 0x2000, 2, out);
+	CHECK(near(out[959 * 2], 0.5, 1e-3));
+	CHECK(near(out[959 * 2 + 1], 0.25, 1e-3));
+
+	// The sub gone: still left / right before 300 ms, left on both after
+	push_read(&a, 0x4000, 0, 10, out);
+	CHECK(near(out[959 * 2 + 1], 0.0, 1e-3));
+	push_read(&a, 0x4000, 0, 10, out);
+	CHECK(out[959 * 2 + 1] == out[959 * 2]);
+
+	audio_rx_stop(&a);
+}
+
 int main(void)
 {
 	test_simple_codecs();
@@ -299,6 +350,7 @@ int main(void)
 	test_opus_roundtrip();
 	test_adpcm_roundtrip();
 	test_output_buffer();
+	test_two_channels();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_audio: %d failure(s)\n", G_FAILS);
