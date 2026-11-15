@@ -63,6 +63,11 @@ struct ui_ops {
 	// The rig on / off (CI-V 18 01 / 18 00; also in standby, when the rig keeps its LAN)
 	//
 	int (*power)(void *ctx, int on);
+
+	//
+	// TX test tone in place of the mic (1 kHz, -6 dBFS); NULL: not offered
+	//
+	void (*test_tone)(void *ctx, int on);
 };
 
 //

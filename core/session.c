@@ -1414,6 +1414,12 @@ void tx_set_mic_gain(struct session *s, int percent)
 		tx_audio_set_gain(s->tx, percent < 0 ? 0u : (unsigned int)percent);
 }
 
+void tx_set_test_tone(struct session *s, int on)
+{
+	if (s->tx != NULL)
+		tx_audio_set_tone(s->tx, on != 0);
+}
+
 void tx_set_ptt_timeout(struct session *s, int enabled, int seconds)
 {
 	// qBound(30, PTTTimeoutSeconds, 999) as wfview; applies from the next PTT on

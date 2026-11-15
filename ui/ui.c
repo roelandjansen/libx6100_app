@@ -113,6 +113,7 @@ static struct {
 	//
 	double tx_hold_db;
 	uint32_t tx_hold_t;
+	bool tone_on;		/* TX test tone in place of the mic */
 
 	//
 	// Last snapshots
@@ -399,6 +400,11 @@ static void on_power_chosen(int idx, void *ud)
 	static const char *const C_SURE[] = { "No", "Yes, power off" };
 
 	(void)ud;
+	if (idx == 2 && G.ops.test_tone != NULL) {
+		G.tone_on = !G.tone_on;
+		G.ops.test_tone(G.ops.ctx, G.tone_on ? 1 : 0);
+		return;
+	}
 	if (G.ops.power == NULL)
 		return;
 	if (idx == 0)
@@ -417,10 +423,14 @@ static void on_overlay_power_on(lv_event_t *e)
 
 static void on_model(lv_event_t *e)
 {
-	static const char *const C_POWER[] = { "Power on", "Power off" };
+	// The test tone (2026-11-15): 1 kHz at -6 dBFS in place of the mic while keyed, to
+	// tell the mic chain from the rig's LAN input
+	static const char *const C_TONE_OFF[] = { "Power on", "Power off", "Test tone on" };
+	static const char *const C_TONE_ON[] = { "Power on", "Power off", "Test tone off" };
 
 	(void)e;
-	ui_chooser_open("Rig", C_POWER, 2, -1, on_power_chosen, NULL);
+	ui_chooser_open("Rig", G.tone_on ? C_TONE_ON : C_TONE_OFF, G.ops.test_tone != NULL ? 3 : 2, -1,
+			on_power_chosen, NULL);
 }
 
 static void on_agc_chosen(int idx, void *ud)
@@ -969,7 +979,9 @@ static void update_lines(void)
 			G.tx_hold_db = db;
 			G.tx_hold_t = t;
 		}
-		if (G.tx_hold_db > -0.1)
+		if (G.tone_on)
+			snprintf(buf, sizeof(buf), "TONE %d dB", (int)lround(G.tx_hold_db));
+		else if (G.tx_hold_db > -0.1)
 			snprintf(buf, sizeof(buf), "%s", "TX CLIP");
 		else
 			snprintf(buf, sizeof(buf), "TX %d dB", (int)lround(G.tx_hold_db));

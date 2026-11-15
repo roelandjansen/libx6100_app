@@ -63,6 +63,7 @@ struct tx_audio {
 	size_t fifo_n;
 	float in[TX_AUDIO_RING_FRAMES / 8];
 	float res[TX_AUDIO_RING_FRAMES / 4];
+	float tone_ph;			// test tone phase, radians
 	float fifo[TX_AUDIO_MAX_BLOCK * 8];
 	uint8_t enc[TX_AUDIO_MAX_ENC];
 
@@ -70,6 +71,7 @@ struct tx_audio {
 	// Shared
 	//
 	atomic_uint gain_pct;
+	atomic_bool tone;		// test tone in place of the mic (TX_AUDIO_TONE_*)
 	atomic_size_t head;		// written frames (capture)
 	atomic_size_t tail;		// read frames (network thread)
 	atomic_uint overrun_frames;
@@ -107,6 +109,12 @@ size_t tx_audio_pump(struct tx_audio *t, tx_audio_emit emit, void *ctx);
 //
 
 void tx_audio_set_gain(struct tx_audio *t, unsigned int percent);
+
+// Test tone (2026-11-15): TX_AUDIO_TONE_HZ at TX_AUDIO_TONE_LEVEL in place of the mic
+// (the mic gain left out), to tell the mic chain from the radio's LAN input
+#define TX_AUDIO_TONE_HZ	1000.0f
+#define TX_AUDIO_TONE_LEVEL	0.5f	/* -6 dBFS */
+void tx_audio_set_tone(struct tx_audio *t, bool on);
 void tx_audio_get_stats(const struct tx_audio *t, struct tx_audio_stats *out);
 
 //

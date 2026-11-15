@@ -185,6 +185,27 @@ static void test_ring_gain_stereo(void)
 	tx_audio_stop(&G_TX);
 }
 
+static void test_tone(void)
+{
+	// Test tone: silence from the mic, a -6 dBFS sine out, the mic gain left out
+	G_PHASE = 0;
+	memset(&G_OUT, 0, sizeof(G_OUT));
+	tx_audio_init(&G_TX, 48000);
+	CHECK(tx_audio_configure(&G_TX, AUDIO_CODEC_PCM16_1, 48000) == 0);
+	tx_audio_set_gain(&G_TX, 400);
+	tx_audio_set_tone(&G_TX, true);
+	write_sine(&G_TX, 48000, 1000.0, 0.0, 960, 1);
+	CHECK(tx_audio_pump(&G_TX, on_emit, NULL) == 1);
+	CHECK(fabsf(G_OUT.peak - 0.5f) < 0.01f);
+
+	// Off again: the mic as before
+	tx_audio_set_tone(&G_TX, false);
+	write_sine(&G_TX, 48000, 1000.0, 0.0, 960, 1);
+	CHECK(tx_audio_pump(&G_TX, on_emit, NULL) == 1);
+	CHECK(G_OUT.peak < 0.001f);
+	tx_audio_stop(&G_TX);
+}
+
 static void test_ulaw(void)
 {
 	// G.711 reference points
@@ -270,6 +291,7 @@ int main(void)
 	test_codecs();
 	test_refused();
 	test_ring_gain_stereo();
+	test_tone();
 	test_ulaw();
 	test_packets();
 

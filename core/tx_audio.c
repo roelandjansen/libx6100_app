@@ -16,6 +16,8 @@
 #include "third_party/adpcm/adpcm-lib.h"
 #include "third_party/opus/include/opus.h"
 
+#define C_TWO_PI	6.28318530718f
+
 #define C_RING_MASK	(TX_AUDIO_RING_FRAMES - 1u)
 
 void tx_audio_init(struct tx_audio *t, uint32_t cap_rate)
@@ -23,6 +25,7 @@ void tx_audio_init(struct tx_audio *t, uint32_t cap_rate)
 	memset(t, 0, sizeof(*t));
 	t->cap_rate = cap_rate;
 	atomic_init(&t->gain_pct, 100u);
+	atomic_init(&t->tone, false);
 	atomic_init(&t->head, 0);
 	atomic_init(&t->tail, 0);
 	atomic_init(&t->overrun_frames, 0u);
@@ -258,8 +261,20 @@ size_t tx_audio_pump(struct tx_audio *t, tx_audio_emit emit, void *ctx)
 		if (head - tail < t->block_in)
 			break;
 
-		for (i = 0; i < t->block_in; i++)
-			t->in[i] = t->ring[(tail + i) & C_RING_MASK] * gain;
+		if (atomic_load(&t->tone)) {
+			// Test tone: the capture is used up as ever, a fixed sine goes out
+			const float dph = C_TWO_PI * TX_AUDIO_TONE_HZ / (float)t->cap_rate;
+
+			for (i = 0; i < t->block_in; i++) {
+				t->in[i] = TX_AUDIO_TONE_LEVEL * sinf(t->tone_ph);
+				t->tone_ph += dph;
+				if (t->tone_ph > C_TWO_PI)
+					t->tone_ph -= C_TWO_PI;
+			}
+		} else {
+			for (i = 0; i < t->block_in; i++)
+				t->in[i] = t->ring[(tail + i) & C_RING_MASK] * gain;
+		}
 		tail += t->block_in;
 		atomic_store_explicit(&t->tail, tail, memory_order_release);
 
@@ -313,6 +328,11 @@ size_t tx_audio_pump(struct tx_audio *t, tx_audio_emit emit, void *ctx)
 void tx_audio_set_gain(struct tx_audio *t, unsigned int percent)
 {
 	atomic_store(&t->gain_pct, percent > 400u ? 400u : percent);
+}
+
+void tx_audio_set_tone(struct tx_audio *t, bool on)
+{
+	atomic_store(&t->tone, on);
 }
 
 void tx_audio_get_stats(const struct tx_audio *t, struct tx_audio_stats *out)
