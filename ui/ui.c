@@ -1163,8 +1163,9 @@ static void update_overlay(void)
 	else
 		lv_obj_add_flag(G.b_power_on, LV_OBJ_FLAG_HIDDEN);
 
+	// The CI-V address the rig gave at login: the ID query goes there (2026-11-17)
 	if (G.info.state == SESSION_CONNECTED)
-		snprintf(buf, sizeof(buf), "%s\n%s", G.info.radio_name,
+		snprintf(buf, sizeof(buf), "%s  CI-V %02X\n%s", G.info.radio_name, G.info.civ_addr,
 				G.power_on_sent ? "switching on ..." : "reading radio state\n(rig off? Power on)");
 	else if (G.info.status[0] != '\0')
 		snprintf(buf, sizeof(buf), "%s\n%s", session_state_name(G.info.state), G.info.status);
