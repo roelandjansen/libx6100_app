@@ -189,6 +189,29 @@ static void test_detect_and_poll(void)
 		}
 		CHECK(smeter >= 44 && smeter <= 52);
 	}
+
+	// TX meters (2026-11-17): the rig reports TX: Power and SWR meter are polled; back
+	// on RX they are not any more
+	{
+		static const uint8_t C_TX_ON[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x1c, 0x00, 0x01, 0xfd };
+		static const uint8_t C_TX_OFF[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x1c, 0x00, 0x00, 0xfd };
+		static const uint8_t C_PO[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x15, 0x11, 0xfd };
+		static const uint8_t C_SWR[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x15, 0x12, 0xfd };
+
+		G.n = 0;
+		tick_n(100, &t);
+		CHECK(!sent(C_PO, sizeof(C_PO)));
+		feed(C_TX_ON, sizeof(C_TX_ON));
+		G.n = 0;
+		tick_n(100, &t);
+		CHECK(sent(C_PO, sizeof(C_PO)));
+		CHECK(sent(C_SWR, sizeof(C_SWR)));
+		feed(C_TX_OFF, sizeof(C_TX_OFF));
+		G.n = 0;
+		tick_n(100, &t);
+		CHECK(!sent(C_PO, sizeof(C_PO)));
+		CHECK(!sent(C_SWR, sizeof(C_SWR)));
+	}
 }
 
 static void test_decode(void)

@@ -838,6 +838,22 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 	case K_BOOL:
 		if (dl < 1)
 			return 0;
+
+		// TX meters while transmitting (2026-11-17, as wfview's receiver widget does on
+		// funcTransceiverStatus): Power, SWR, ALC and Comp at the top priority from TX on,
+		// taken off at RX. The rig files poll none of them: the app showed 0 W in TX
+		if (ke->field == offsetof(struct radio_state, transmit) &&
+				(!r->st.transmit.valid || (r->st.transmit.value != 0) != (d[0] != 0))) {
+			static const char *const C_TX_METERS[] = { "Power Meter", "SWR Meter", "ALC Meter", "Comp Meter" };
+			size_t m;
+
+			for (m = 0; m < sizeof(C_TX_METERS) / sizeof(C_TX_METERS[0]); m++) {
+				if (d[0] != 0)
+					add_named(r, RIG_PRIO_HIGHEST, C_TX_METERS[m], true, 0, false, 0);
+				else
+					queue_del(r, rig_cmd_index(r, C_TX_METERS[m]), 0);
+			}
+		}
 		set_value(r, ke->field, d[0] != 0);
 		return RADIO_CHG_FLAGS;
 
