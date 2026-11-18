@@ -26,6 +26,7 @@ void tx_audio_init(struct tx_audio *t, uint32_t cap_rate)
 	t->cap_rate = cap_rate;
 	atomic_init(&t->gain_pct, 100u);
 	atomic_init(&t->tone, false);
+	atomic_init(&t->mute, false);
 	atomic_init(&t->head, 0);
 	atomic_init(&t->tail, 0);
 	atomic_init(&t->overrun_frames, 0u);
@@ -271,6 +272,10 @@ size_t tx_audio_pump(struct tx_audio *t, tx_audio_emit emit, void *ctx)
 				if (t->tone_ph > C_TWO_PI)
 					t->tone_ph -= C_TWO_PI;
 			}
+		} else if (atomic_load(&t->mute)) {
+			// Muted (the VOL tap): silence out, the capture used up as ever
+			for (i = 0; i < t->block_in; i++)
+				t->in[i] = 0.0f;
 		} else {
 			for (i = 0; i < t->block_in; i++)
 				t->in[i] = t->ring[(tail + i) & C_RING_MASK] * gain;
@@ -333,6 +338,11 @@ void tx_audio_set_gain(struct tx_audio *t, unsigned int percent)
 void tx_audio_set_tone(struct tx_audio *t, bool on)
 {
 	atomic_store(&t->tone, on);
+}
+
+void tx_audio_set_mute(struct tx_audio *t, bool on)
+{
+	atomic_store(&t->mute, on);
 }
 
 void tx_audio_get_stats(const struct tx_audio *t, struct tx_audio_stats *out)

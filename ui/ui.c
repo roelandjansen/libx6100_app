@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "core/rigfile.h"
 #include "ui/ui_chooser.h"
@@ -140,6 +141,9 @@ static struct {
 	uint32_t row_seq;
 	bool have_row;
 	uint8_t volume;
+	bool muted;		/* the VOL tap: RX silent, silence in place of the mic */
+	bool vfo_b;		/* VFO B selected (from the app: the rig gives no read-back) */
+	lv_obj_t *l_utc;	/* UTC date and time in the status bar */
 	bool ptt_held;
 
 	// The tuner asked often for a while after a press (ATU in / out, tune): atu_*
@@ -606,14 +610,33 @@ static void on_freq(lv_event_t *e)
 	ui_keypad_open("Frequency (MHz)", on_freq_entered, NULL);
 }
 
+// VOL (2026-11-18): a short tap mutes RX and TX (silence in place of the mic) or ends
+// it; a long press opens the volume slider (a change there ends the mute)
+static void set_mute(bool on)
+{
+	G.muted = on;
+	G.ops.set_volume(G.ops.ctx, on ? 0 : G.volume);
+	if (G.ops.tx_mute != NULL)
+		G.ops.tx_mute(G.ops.ctx, on ? 1 : 0);
+}
+
 static void on_vol_changed(int value, void *ud)
 {
 	(void)ud;
 	G.volume = (uint8_t)value;
-	G.ops.set_volume(G.ops.ctx, G.volume);
+	if (G.muted)
+		set_mute(false);
+	else
+		G.ops.set_volume(G.ops.ctx, G.volume);
 }
 
 static void on_vol(lv_event_t *e)
+{
+	(void)e;
+	set_mute(!G.muted);
+}
+
+static void on_vol_long(lv_event_t *e)
 {
 	(void)e;
 	ui_slider_open("Volume", 0, 255, G.volume, on_vol_changed, NULL);
@@ -749,18 +772,102 @@ static void on_scope_drag(int steps, void *ud)
 // Layout
 //
 
+//
+// The VFO label (2026-11-18): per rig as its file has it. Two receivers with one VFO
+// each (785x, 7760, 7610): MAIN / SUB; two with two each (9700): MAIN A ... SUB B; one
+// with two (705, 7300, X6100): VFO A / B. A tap: the choice of what the rig has; main /
+// sub with VFO Main/Sub Band (read back), A / B with VFO A / B Select (no read-back:
+// the last chosen here)
+//
+
+static bool rig_has_ms(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+
+	return r != NULL && r->receivers >= 2 && rigfile_cmd(r, "VFO Main/Sub Band") != NULL;
+}
+
+static bool rig_has_ab(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+
+	return r != NULL && r->vfos >= 2 && rigfile_cmd(r, "VFO A Select") != NULL &&
+			rigfile_cmd(r, "VFO B Select") != NULL;
+}
+
+static void vfo_text(char *buf, size_t n)
+{
+	const bool sub = G.st.rx_selected.valid && G.st.rx_selected.value != 0;
+	const bool split = G.st.split.valid && G.st.split.value;
+
+	if (rig_has_ms() && rig_has_ab())
+		snprintf(buf, n, "%s %s%s", sub ? "SUB" : "MAIN", G.vfo_b ? "B" : "A", split ? " SPLIT" : "");
+	else if (rig_has_ms())
+		snprintf(buf, n, "%s%s", sub ? "SUB" : "MAIN", split ? " SPLIT" : "");
+	else
+		snprintf(buf, n, "VFO %s%s", G.vfo_b ? "B" : "A", split ? " SPLIT" : "");
+}
+
+static const char *const C_VFO_MSAB[] = { "MAIN A", "MAIN B", "SUB A", "SUB B" };
+static const char *const C_VFO_MS[] = { "MAIN", "SUB" };
+static const char *const C_VFO_AB[] = { "VFO A", "VFO B" };
+
+static void on_vfo_chosen(int idx, void *ud)
+{
+	const bool ms = rig_has_ms(), ab = rig_has_ab();
+	int sub = -1, b = -1;
+
+	(void)ud;
+	if (idx < 0)
+		return;
+	if (ms && ab) {
+		sub = idx / 2;
+		b = idx % 2;
+	} else if (ms) {
+		sub = idx;
+	} else {
+		b = idx;
+	}
+
+	// Main / sub first (the scope with it, as the tap on the sub line), then A / B on it
+	if (sub >= 0) {
+		G.ops.set_value(G.ops.ctx, "VFO Main/Sub Band", sub);
+		if (rigfile_cmd(G.ops.get_rig(G.ops.ctx), "Scope Main/Sub") != NULL)
+			G.ops.set_value(G.ops.ctx, "Scope Main/Sub", sub);
+	}
+	if (b >= 0 && G.ops.send_cmd != NULL && G.ops.send_cmd(G.ops.ctx, b ? "VFO B Select" : "VFO A Select") == 0)
+		G.vfo_b = b != 0;
+}
+
+static void on_vfo(lv_event_t *e)
+{
+	const bool ms = rig_has_ms(), ab = rig_has_ab();
+	const bool sub = G.st.rx_selected.valid && G.st.rx_selected.value != 0;
+
+	(void)e;
+	if (ms && ab)
+		ui_chooser_open("Receiver / VFO", C_VFO_MSAB, 4, (sub ? 2 : 0) + (G.vfo_b ? 1 : 0), on_vfo_chosen, NULL);
+	else if (ms)
+		ui_chooser_open("Receiver", C_VFO_MS, 2, sub ? 1 : 0, on_vfo_chosen, NULL);
+	else if (ab)
+		ui_chooser_open("VFO", C_VFO_AB, 2, G.vfo_b ? 1 : 0, on_vfo_chosen, NULL);
+}
+
 static void build_status(lv_obj_t *scr)
 {
 	lv_obj_t *r = box(scr, U(30), C_PANEL);
 
 	G.l_rxtx = label(r, G.f_med, C_GREEN, "RX");
 	lv_obj_align(G.l_rxtx, LV_ALIGN_LEFT_MID, U(8), 0);
-	G.l_vfo = label(r, G.f_small, C_TEXT, "VFO A");
+	G.l_vfo = tap_label(r, G.f_small, C_TEXT, "VFO A", on_vfo);	/* tap: receiver / VFO */
 	lv_obj_align(G.l_vfo, LV_ALIGN_LEFT_MID, U(52), 0);
 	G.l_model = tap_label(r, G.f_small, C_DIM, "", on_model);	/* tap: the rig on / off */
 	lv_obj_align(G.l_model, LV_ALIGN_CENTER, 0, 0);
 	G.l_link = label(r, G.f_small, C_DIM, "");
 	lv_obj_align(G.l_link, LV_ALIGN_RIGHT_MID, -U(8), 0);
+	// UTC between the rig name and the latency (2026-11-18)
+	G.l_utc = label(r, G.f_small, C_DIM, "");
+	lv_obj_align(G.l_utc, LV_ALIGN_RIGHT_MID, -U(62), 0);
 }
 
 static void build_meter(lv_obj_t *scr)
@@ -839,7 +946,8 @@ static void build_bottom(lv_obj_t *scr)
 	lv_obj_add_event_cb(G.b_tune, on_atu, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(G.b_tune, on_tune, LV_EVENT_LONG_PRESSED, NULL);
 	G.b_vol = button(r, U(96), U(52), "VOL", 0x263241, &G.l_vol);
-	lv_obj_add_event_cb(G.b_vol, on_vol, LV_EVENT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.b_vol, on_vol, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.b_vol, on_vol_long, LV_EVENT_LONG_PRESSED, NULL);
 	G.b_ptt = button(r, U(170), U(60), "PTT", 0x3a2328, &G.l_ptt);
 	lv_obj_set_style_text_font(G.l_ptt, G.f_large, 0);
 	lv_obj_add_event_cb(G.b_ptt, on_ptt, LV_EVENT_PRESSED, NULL);
@@ -998,6 +1106,7 @@ static void update_lines(void)
 	else
 		snprintf(buf, sizeof(buf), "%s", session_state_name(G.info.state));
 	set_text_if(G.l_link, buf);
+	lv_obj_align_to(G.l_utc, G.l_link, LV_ALIGN_OUT_LEFT_MID, -U(10), 0);	/* UTC left of it */
 
 	// Frequency, mode, filter, step
 	if (rx->freq_valid[0]) {
@@ -1091,7 +1200,19 @@ static void update_lines(void)
 		lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
 	}
-	set_text_if(G.l_vfo, G.st.split.valid && G.st.split.value ? "VFO A/B" : "VFO A");
+	vfo_text(buf, sizeof(buf));
+	set_text_if(G.l_vfo, buf);
+
+	// UTC date and time (2026-11-18)
+	{
+		const time_t now = time(NULL);
+		struct tm tm;
+
+		if (gmtime_r(&now, &tm) != NULL) {
+			snprintf(buf, sizeof(buf), "%02d-%02d %02d:%02dZ", tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+			set_text_if(G.l_utc, buf);
+		}
+	}
 
 	// Scope label
 	if (rx->scope.mode.valid && rx->scope.span_hz.valid) {
@@ -1101,7 +1222,11 @@ static void update_lines(void)
 
 	// Bottom bar
 	lv_obj_set_style_bg_color(G.b_lock, lv_color_hex(lock ? 0x8d6e1f : 0x263241), 0);
-	snprintf(buf, sizeof(buf), "VOL %d", G.volume * 100 / 255);
+	if (G.muted)
+		snprintf(buf, sizeof(buf), "%s", "MUTE");
+	else
+		snprintf(buf, sizeof(buf), "VOL %d", G.volume * 100 / 255);
+	lv_obj_set_style_bg_color(G.b_vol, lv_color_hex(G.muted ? 0x8d2f2f : 0x263241), 0);
 	set_text_if(G.l_vol, buf);
 	// PTT needs TX; the ATU button stays usable (in / out sends nothing on the air; its
 	// tune checks TX itself)
@@ -1175,6 +1300,60 @@ static void update_overlay(void)
 	lv_obj_remove_flag(G.overlay, LV_OBJ_FLAG_HIDDEN);
 }
 
+//
+// Scope markers (2026-11-18, as x6100_trx): red main / VFO A, green sub / VFO B, yellow
+// TX while split, by identity as the IC-7851 (not by which is active). The active one
+// always; the other while dual watch or split is on; TX (on the other one) with split.
+// rx[0] is the selected receiver / VFO; the other is rx[1] (RX Frequency, two receivers)
+// or rx[0]'s unselected (Unselected Freq: the other VFO, or the sub on the IC-9700)
+//
+
+#define C_MARK_M	0xE03030
+#define C_MARK_S	0x3CC83C
+#define C_MARK_T	0xF0D020
+
+static void update_markers(void)
+{
+	struct ui_scope_marker mk[3];
+	const bool ms = rig_has_ms();
+	const bool second = ms ? G.st.rx_selected.valid && G.st.rx_selected.value != 0 : G.vfo_b;
+	const bool split = G.st.split.valid && G.st.split.value;
+	const bool dw = G.st.dual_watch.valid && G.st.dual_watch.value != 0;
+	const struct radio_rx *r0 = &G.st.rx[0];
+	bool other_ok = false;
+	uint64_t other = 0;
+
+	if (ms && G.st.rx[1].freq_valid[0]) {
+		other = G.st.rx[1].freq_hz[0];
+		other_ok = true;
+	} else if (r0->freq_valid[1]) {
+		other = r0->freq_hz[1];
+		other_ok = true;
+	}
+
+	memset(mk, 0, sizeof(mk));
+	// [0] main / A, [1] sub / B, [2] TX
+	mk[0].color = C_MARK_M;
+	mk[1].color = C_MARK_S;
+	mk[2].color = C_MARK_T;
+	mk[0].tag = ms ? 'M' : 'A';
+	mk[1].tag = ms ? 'S' : 'B';
+	mk[2].tag = 'T';
+
+	// The active one, and the other where it is known and wanted
+	mk[second ? 1 : 0].on = true;
+	mk[second ? 1 : 0].hz = r0->freq_hz[0];
+	if (other_ok && (dw || split)) {
+		mk[second ? 0 : 1].on = true;
+		mk[second ? 0 : 1].hz = other;
+	}
+	if (other_ok && split) {
+		mk[2].on = true;
+		mk[2].hz = other;
+	}
+	ui_scope_set_markers(&G.scope, mk);
+}
+
 void ui_poll(void)
 {
 	G.ops.get_info(G.ops.ctx, &G.info);
@@ -1199,6 +1378,7 @@ void ui_poll(void)
 
 		ui_scope_set_passband(&G.scope, G.st.rx[0].freq_hz[0], m->name,
 				G.st.filter_width.valid ? G.st.filter_width.value : 0);
+		update_markers();
 	}
 
 	atu_poll();

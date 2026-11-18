@@ -171,7 +171,96 @@ int ui_scope_create(struct ui_scope *sc, lv_obj_t *parent, const struct ui_scope
 	sc->l_low = edge_label(sc->spec, cfg->font, LV_ALIGN_BOTTOM_LEFT);
 	sc->l_mid = edge_label(sc->spec, cfg->font, LV_ALIGN_BOTTOM_MID);
 	sc->l_high = edge_label(sc->spec, cfg->font, LV_ALIGN_BOTTOM_RIGHT);
+
+	// Marker tags (a letter on the marker's colour) and the out-of-view arrows
+	for (i = 0; i < 3; i++) {
+		sc->l_tag[i] = edge_label(sc->spec, cfg->font, LV_ALIGN_TOP_LEFT);
+		lv_obj_set_style_text_color(sc->l_tag[i], lv_color_hex(0x000000), 0);
+		lv_obj_set_style_bg_opa(sc->l_tag[i], LV_OPA_COVER, 0);
+		lv_obj_set_style_pad_hor(sc->l_tag[i], 3, 0);
+		lv_obj_add_flag(sc->l_tag[i], LV_OBJ_FLAG_HIDDEN);
+		sc->l_arrow[i] = edge_label(sc->spec, cfg->font, LV_ALIGN_TOP_LEFT);
+		lv_obj_set_style_bg_color(sc->l_arrow[i], lv_color_hex(0x000000), 0);
+		lv_obj_set_style_bg_opa(sc->l_arrow[i], LV_OPA_COVER, 0);
+		lv_obj_add_flag(sc->l_arrow[i], LV_OBJ_FLAG_HIDDEN);
+	}
 	return 0;
+}
+
+//
+// Markers (2026-11-18, as x6100_trx's draw_markers): set each poll; the lines go into the
+// spectrum at its next row, tags and arrows are placed here. Markers on one column (2 px)
+// share one tag: TX first, then the active, then the other (as on the IC-7851)
+//
+
+void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark[3])
+{
+	static const int prio[3] = { 2, 0, 1 };
+	const int32_t w = sc->cfg.w;
+	const int32_t tag_y = sc->cfg.spec_h / 5;
+	int32_t tag_x[3];
+	int ntag = 0;
+	int p;
+	int i;
+
+	memcpy(sc->mark, mark, sizeof(sc->mark));
+	sc->marks_set = true;
+
+	for (i = 0; i < 3; i++) {
+		lv_obj_add_flag(sc->l_tag[i], LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(sc->l_arrow[i], LV_OBJ_FLAG_HIDDEN);
+	}
+	if (!sc->have_row)
+		return;
+
+	for (p = 0; p < 3; p++) {
+		const int k = prio[p];
+		const int32_t x = hz_to_x(sc, mark[k].hz);
+		char t[2] = { mark[k].tag, '\0' };
+		bool shared = false;
+		int q;
+
+		if (!mark[k].on)
+			continue;
+
+		// Out of view: an arrow at that edge, one row down per marker
+		if (x < 0 || x >= w) {
+			lv_label_set_text(sc->l_arrow[k], x < 0 ? "<<" : ">>");
+			lv_obj_set_style_text_color(sc->l_arrow[k], lv_color_hex(mark[k].color), 0);
+			lv_obj_align(sc->l_arrow[k], x < 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0,
+					(k - 1) * lv_font_get_line_height(sc->cfg.font));
+			lv_obj_remove_flag(sc->l_arrow[k], LV_OBJ_FLAG_HIDDEN);
+			continue;
+		}
+
+		// One tag a column: one tagged before within 2 px takes it
+		for (q = 0; q < p; q++) {
+			const int j = prio[q];
+			const int32_t xj = hz_to_x(sc, mark[j].hz);
+
+			if (mark[j].on && xj >= 0 && xj < w && abs(xj - x) <= 2)
+				shared = true;
+		}
+		if (shared)
+			continue;
+
+		lv_label_set_text(sc->l_tag[k], t);
+		lv_obj_set_style_bg_color(sc->l_tag[k], lv_color_hex(mark[k].color), 0);
+		lv_obj_update_layout(sc->l_tag[k]);
+		{
+			const int32_t tw = lv_obj_get_width(sc->l_tag[k]);
+			int32_t tx = x - tw / 2;
+			int row = 0;
+
+			tx = tx < 0 ? 0 : tx + tw > w ? w - tw : tx;
+			for (q = 0; q < ntag; q++)
+				row += abs(tag_x[q] - tx) < tw + 2 ? 1 : 0;
+			tag_x[ntag++] = tx;
+			lv_obj_align(sc->l_tag[k], LV_ALIGN_TOP_LEFT, tx,
+					tag_y + row * (lv_font_get_line_height(sc->cfg.font) + 2));
+		}
+		lv_obj_remove_flag(sc->l_tag[k], LV_OBJ_FLAG_HIDDEN);
+	}
 }
 
 void ui_scope_destroy(struct ui_scope *sc)
@@ -253,13 +342,26 @@ static void draw_spectrum(struct ui_scope *sc)
 	const int32_t pb_x0 = hz_to_x(sc, sc->pb_lo);
 	const int32_t pb_x1 = hz_to_x(sc, sc->pb_hi);
 	const int32_t vfo_x = hz_to_x(sc, sc->vfo_hz);
+	int32_t mark_x[3];
 	int32_t x;
 	int32_t y;
+	int k;
+
+	for (k = 0; k < 3; k++)
+		mark_x[k] = sc->marks_set && sc->mark[k].on ? hz_to_x(sc, sc->mark[k].hz) : -1;
 
 	for (x = 0; x < w; x++) {
 		const int32_t top = h - 1 - (int32_t)sc->level[x] * (h - 1) / 255;
 		const bool in_pb = x >= pb_x0 && x <= pb_x1;
-		const bool is_vfo = x == vfo_x;
+		const bool is_vfo = !sc->marks_set && x == vfo_x;
+		uint16_t mcol[3];
+		int nm = 0;
+
+		// The markers on this column: dashed, 6 px on and 3 off for one, 6 px each in
+		// turn for more (as x6100_trx)
+		for (k = 0; k < 3; k++)
+			if (mark_x[k] == x)
+				mcol[nm++] = rgb565(sc->mark[k].color);
 
 		for (y = 0; y < h; y++) {
 			uint16_t c = (y % (h / 5 > 0 ? h / 5 : 1) == 0 || x % (w / 8 > 0 ? w / 8 : 1) == 0) ? grid : bg;
@@ -272,6 +374,10 @@ static void draw_spectrum(struct ui_scope *sc)
 				c = mix565(c, pb);
 			if (is_vfo)
 				c = vfo;
+			if (nm == 1 && y % 9 < 6)
+				c = mcol[0];
+			else if (nm > 1)
+				c = mcol[(y / 6) % nm];
 			sc->spec_buf[(size_t)y * (size_t)w + (size_t)x] = c;
 		}
 	}

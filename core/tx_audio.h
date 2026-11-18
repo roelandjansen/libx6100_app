@@ -72,6 +72,7 @@ struct tx_audio {
 	//
 	atomic_uint gain_pct;
 	atomic_bool tone;		// test tone in place of the mic (TX_AUDIO_TONE_*)
+	atomic_bool mute;		// silence in place of the mic (the VOL tap, 2026-11-18)
 	atomic_size_t head;		// written frames (capture)
 	atomic_size_t tail;		// read frames (network thread)
 	atomic_uint overrun_frames;
@@ -115,6 +116,7 @@ void tx_audio_set_gain(struct tx_audio *t, unsigned int percent);
 #define TX_AUDIO_TONE_HZ	1000.0f
 #define TX_AUDIO_TONE_LEVEL	0.5f	/* -6 dBFS */
 void tx_audio_set_tone(struct tx_audio *t, bool on);
+void tx_audio_set_mute(struct tx_audio *t, bool on);	/* silence in place of the mic */
 void tx_audio_get_stats(const struct tx_audio *t, struct tx_audio_stats *out);
 
 //

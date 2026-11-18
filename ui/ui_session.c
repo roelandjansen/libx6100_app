@@ -120,6 +120,16 @@ static void op_audio_route(void *ctx, int route)
 	session_set_audio_route(ctx, route);
 }
 
+static void op_tx_mute(void *ctx, int on)
+{
+	tx_set_mic_mute(ctx, on);
+}
+
+static int op_send_cmd(void *ctx, const char *type)
+{
+	return session_send_cmd(ctx, type);
+}
+
 void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 {
 	ops->ctx = s;
@@ -135,6 +145,8 @@ void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 	ops->power = op_power;
 	ops->test_tone = op_test_tone;
 	ops->audio_route = op_audio_route;
+	ops->tx_mute = op_tx_mute;
+	ops->send_cmd = op_send_cmd;
 	ops->set_span = op_set_span;
 	ops->set_step = op_set_step;
 	ops->get_step = op_get_step;

@@ -73,6 +73,13 @@ struct ui_ops {
 	// Two-channel RX audio: AUDIO_ROUTE_* (auto, main or sub on both); NULL: not offered
 	//
 	void (*audio_route)(void *ctx, int route);
+
+	//
+	// Mute: silence in place of the mic (the VOL tap); a rig file command without a
+	// value (VFO A / B Select). NULL: not offered
+	//
+	void (*tx_mute)(void *ctx, int on);
+	int (*send_cmd)(void *ctx, const char *type);
 };
 
 //

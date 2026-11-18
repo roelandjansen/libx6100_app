@@ -50,6 +50,21 @@ struct ui_scope {
 	bool have_row;
 
 	//
+	// Markers as on x6100_trx (2026-11-18): the active receiver / VFO, the other one, TX;
+	// dashed lines with a lettered tag; outside the view << / >> at that edge. None set:
+	// the plain VFO line as before
+	//
+	struct ui_scope_marker {
+		bool on;
+		uint64_t hz;
+		uint32_t color;
+		char tag;
+	} mark[3];
+	bool marks_set;
+	lv_obj_t *l_tag[3];
+	lv_obj_t *l_arrow[3];
+
+	//
 	// Touch
 	//
 	int32_t press_x;
@@ -61,3 +76,4 @@ int ui_scope_create(struct ui_scope *sc, lv_obj_t *parent, const struct ui_scope
 void ui_scope_destroy(struct ui_scope *sc);
 void ui_scope_push(struct ui_scope *sc, const struct radio_scope_row *row, int amp_max);
 void ui_scope_set_passband(struct ui_scope *sc, uint64_t vfo_hz, const char *mode, int width_hz);
+void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark[3]);

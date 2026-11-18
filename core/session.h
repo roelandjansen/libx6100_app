@@ -268,6 +268,8 @@ int tx_ptt_heartbeat(struct session *s);
 int tx_tune(struct session *s);
 void tx_set_mic_gain(struct session *s, int percent);
 void tx_set_test_tone(struct session *s, int on);	/* 1 kHz at -6 dBFS in place of the mic */
+void tx_set_mic_mute(struct session *s, int on);	/* silence in place of the mic */
+int session_send_cmd(struct session *s, const char *type);	/* a rig file command without a value */
 void tx_set_ptt_timeout(struct session *s, int enabled, int seconds);
 
 //

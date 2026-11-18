@@ -1608,6 +1608,38 @@ void tx_set_test_tone(struct session *s, int on)
 		tx_audio_set_tone(s->tx, on != 0);
 }
 
+void tx_set_mic_mute(struct session *s, int on)
+{
+	if (s->tx != NULL)
+		tx_audio_set_mute(s->tx, on != 0);
+}
+
+//
+// A rig file command without a value (2026-11-18: VFO A Select, VFO B Select): its bytes
+// as a frame of our own to the address from the login; the rig layer encodes values for
+// the kinds it knows only. -1 when the rig file has no such set
+//
+
+int session_send_cmd(struct session *s, const char *type)
+{
+	const struct rig_def *def = session_rig_def(s);
+	const struct rig_cmd *c = def != NULL ? rigfile_cmd(def, type) : NULL;
+	uint8_t f[4 + RIG_CMD_BYTES + 1];
+	size_t n = 0;
+
+	if (c == NULL || !c->set || c->n == 0 || s->ctl.civ_id == 0x00)
+		return -1;
+
+	f[n++] = 0xfe;
+	f[n++] = 0xfe;
+	f[n++] = s->ctl.civ_id;
+	f[n++] = RIG_CONTROLLER_ADDR;
+	memcpy(f + n, c->bytes, c->n);
+	n += c->n;
+	f[n++] = 0xfd;
+	return session_civ_send(s, f, n);
+}
+
 void tx_set_ptt_timeout(struct session *s, int enabled, int seconds)
 {
 	// qBound(30, PTTTimeoutSeconds, 999) as wfview; applies from the next PTT on
