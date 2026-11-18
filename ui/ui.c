@@ -1202,6 +1202,9 @@ static void update_lines(void)
 	}
 	vfo_text(buf, sizeof(buf));
 	set_text_if(G.l_vfo, buf);
+	// The rig name right after it, the time left of the latency: the full date and time
+	// did not fit with the name in the centre (2026-11-18)
+	lv_obj_align_to(G.l_model, G.l_vfo, LV_ALIGN_OUT_RIGHT_MID, U(12), 0);
 
 	// UTC date and time (2026-11-18)
 	{
@@ -1209,7 +1212,8 @@ static void update_lines(void)
 		struct tm tm;
 
 		if (gmtime_r(&now, &tm) != NULL) {
-			snprintf(buf, sizeof(buf), "%02d-%02d %02d:%02dZ", tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min);
+			snprintf(buf, sizeof(buf), "%04d%02d%02d %02d:%02d:%02dZ", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+					tm.tm_hour, tm.tm_min, tm.tm_sec);
 			set_text_if(G.l_utc, buf);
 		}
 	}
