@@ -63,6 +63,8 @@ struct ui_scope {
 	bool marks_set;
 	lv_obj_t *l_tag[3];
 	lv_obj_t *l_arrow[3];
+	lv_obj_t *wf_line[3];	/* the markers through the waterfall, for a while after a change */
+	uint32_t wf_until;	/* lv_tick_get() until then (0 none) */
 
 	//
 	// Touch

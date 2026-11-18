@@ -183,25 +183,50 @@ int ui_scope_create(struct ui_scope *sc, lv_obj_t *parent, const struct ui_scope
 		lv_obj_set_style_bg_color(sc->l_arrow[i], lv_color_hex(0x000000), 0);
 		lv_obj_set_style_bg_opa(sc->l_arrow[i], LV_OPA_COVER, 0);
 		lv_obj_add_flag(sc->l_arrow[i], LV_OBJ_FLAG_HIDDEN);
+
+		// Through the waterfall: 2 px, not clickable (taps and drags stay on the canvas)
+		sc->wf_line[i] = lv_obj_create(sc->wf);
+		lv_obj_remove_style_all(sc->wf_line[i]);
+		lv_obj_set_size(sc->wf_line[i], 2, sc->cfg.wf_h);
+		lv_obj_set_style_bg_opa(sc->wf_line[i], LV_OPA_70, 0);
+		lv_obj_remove_flag(sc->wf_line[i], LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE);
+		lv_obj_add_flag(sc->wf_line[i], LV_OBJ_FLAG_HIDDEN);
 	}
 	return 0;
 }
 
 //
 // Markers (2026-11-18, as x6100_trx's draw_markers): set each poll; the lines go into the
-// spectrum at its next row, tags and arrows are placed here. Markers on one column (2 px)
-// share one tag: TX first, then the active, then the other (as on the IC-7851)
+// spectrum at its next row, tags, arrows and the waterfall lines are placed here. Each
+// marker has a tag of its own in its colour; markers on one column (2 px) stack them,
+// T on top, then M / A, then S / B (as on the IC-7851); a tag that would cover one of
+// another column drops below it. After a frequency change the lines go through the
+// waterfall for C_WF_LINE_MS, as on x6100_trx
 //
+
+#define C_WF_LINE_MS	10000u
 
 void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark[3])
 {
-	static const int prio[3] = { 2, 0, 1 };
+	static const int order[3] = { 2, 0, 1 };	/* the stack, top down: T, M / A, S / B */
 	const int32_t w = sc->cfg.w;
 	const int32_t tag_y = sc->cfg.spec_h / 5;
-	int32_t tag_x[3];
-	int ntag = 0;
+	const int32_t lh = lv_font_get_line_height(sc->cfg.font) + 2;
+	const uint32_t now = lv_tick_get();
+	int32_t x[3];
+	int32_t box_x[3];
+	int32_t box_w[3];
+	int box_row[3];
+	int nbox = 0;
+	bool moved = false;
 	int p;
 	int i;
+
+	for (i = 0; i < 3; i++)
+		if (mark[i].on != sc->mark[i].on || (mark[i].on && mark[i].hz != sc->mark[i].hz))
+			moved = true;
+	if (moved)
+		sc->wf_until = now + C_WF_LINE_MS;
 
 	memcpy(sc->mark, mark, sizeof(sc->mark));
 	sc->marks_set = true;
@@ -209,70 +234,56 @@ void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark
 	for (i = 0; i < 3; i++) {
 		lv_obj_add_flag(sc->l_tag[i], LV_OBJ_FLAG_HIDDEN);
 		lv_obj_add_flag(sc->l_arrow[i], LV_OBJ_FLAG_HIDDEN);
+		lv_obj_add_flag(sc->wf_line[i], LV_OBJ_FLAG_HIDDEN);
+		x[i] = mark[i].on && sc->have_row ? hz_to_x(sc, mark[i].hz) : -1;
 	}
 	if (!sc->have_row)
 		return;
 
 	for (p = 0; p < 3; p++) {
-		const int k = prio[p];
-		const int32_t x = hz_to_x(sc, mark[k].hz);
-		bool shared = false;
+		const int k = order[p];
+		char t[2] = { mark[k].tag, '\0' };
+		int32_t tw;
+		int32_t tx;
+		int row = 0;
 		int q;
 
 		if (!mark[k].on)
 			continue;
 
 		// Out of view: an arrow at that edge, one row down per marker
-		if (x < 0 || x >= w) {
-			lv_label_set_text(sc->l_arrow[k], x < 0 ? "<<" : ">>");
+		if (x[k] < 0 || x[k] >= w) {
+			lv_label_set_text(sc->l_arrow[k], x[k] < 0 ? "<<" : ">>");
 			lv_obj_set_style_text_color(sc->l_arrow[k], lv_color_hex(mark[k].color), 0);
-			lv_obj_align(sc->l_arrow[k], x < 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0,
+			lv_obj_align(sc->l_arrow[k], x[k] < 0 ? LV_ALIGN_LEFT_MID : LV_ALIGN_RIGHT_MID, 0,
 					(k - 1) * lv_font_get_line_height(sc->cfg.font));
 			lv_obj_remove_flag(sc->l_arrow[k], LV_OBJ_FLAG_HIDDEN);
 			continue;
 		}
 
-		// One tag a column: one tagged before within 2 px takes it
-		for (q = 0; q < p; q++) {
-			const int j = prio[q];
-			const int32_t xj = hz_to_x(sc, mark[j].hz);
-
-			if (mark[j].on && xj >= 0 && xj < w && abs(xj - x) <= 2)
-				shared = true;
+		// Through the waterfall for a while after a change
+		if (sc->wf_until != 0 && (int32_t)(sc->wf_until - now) > 0) {
+			lv_obj_set_style_bg_color(sc->wf_line[k], lv_color_hex(mark[k].color), 0);
+			lv_obj_set_pos(sc->wf_line[k], x[k], 0);
+			lv_obj_remove_flag(sc->wf_line[k], LV_OBJ_FLAG_HIDDEN);
 		}
-		if (shared)
-			continue;
 
-		// The tag names every marker on this column, in the order M / A, S / B, T
-		// (2026-11-18: one letter only, T, hid the M under it)
-		{
-			char all[4];
-			size_t na = 0;
-			int j;
-
-			for (j = 0; j < 3; j++) {
-				const int32_t xj = hz_to_x(sc, mark[j].hz);
-
-				if (mark[j].on && xj >= 0 && xj < w && abs(xj - x) <= 2)
-					all[na++] = mark[j].tag;
-			}
-			all[na] = '\0';
-			lv_label_set_text(sc->l_tag[k], all);
-		}
+		lv_label_set_text(sc->l_tag[k], t);
 		lv_obj_set_style_bg_color(sc->l_tag[k], lv_color_hex(mark[k].color), 0);
 		lv_obj_update_layout(sc->l_tag[k]);
-		{
-			const int32_t tw = lv_obj_get_width(sc->l_tag[k]);
-			int32_t tx = x - tw / 2;
-			int row = 0;
+		tw = lv_obj_get_width(sc->l_tag[k]);
+		tx = x[k] - tw / 2;
+		tx = tx < 0 ? 0 : tx + tw > w ? w - tw : tx;
 
-			tx = tx < 0 ? 0 : tx + tw > w ? w - tw : tx;
-			for (q = 0; q < ntag; q++)
-				row += abs(tag_x[q] - tx) < tw + 2 ? 1 : 0;
-			tag_x[ntag++] = tx;
-			lv_obj_align(sc->l_tag[k], LV_ALIGN_TOP_LEFT, tx,
-					tag_y + row * (lv_font_get_line_height(sc->cfg.font) + 2));
-		}
+		// The lowest free row: below every box it would cover (its own column's, stacked
+		// in T / M / S order, and those of a column close by)
+		for (q = 0; q < nbox; q++)
+			if (tx < box_x[q] + box_w[q] + 2 && box_x[q] < tx + tw + 2 && box_row[q] >= row)
+				row = box_row[q] + 1;
+		box_x[nbox] = tx;
+		box_w[nbox] = tw;
+		box_row[nbox++] = row;
+		lv_obj_align(sc->l_tag[k], LV_ALIGN_TOP_LEFT, tx, tag_y + row * lh);
 		lv_obj_remove_flag(sc->l_tag[k], LV_OBJ_FLAG_HIDDEN);
 	}
 }
