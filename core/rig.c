@@ -485,6 +485,22 @@ static void send_item(struct rig *r, const struct rig_item *it)
 }
 
 //
+// The receiver's frequency and mode commands: polled at High at the least (addition 7)
+//
+
+static bool fast_poll(const char *command)
+{
+	static const char *const C_NAMES[] = { "RX Mode", "RX Frequency", "Selected Freq", "Selected Mode",
+		"Unselected Freq", "Unselected Mode" };
+	size_t i;
+
+	for (i = 0; i < sizeof(C_NAMES) / sizeof(C_NAMES[0]); i++)
+		if (strcmp(command, C_NAMES[i]) == 0)
+			return true;
+	return false;
+}
+
+//
 // Scheduler interval (MainController.cpp)
 //
 
@@ -563,8 +579,10 @@ static void have_rig_id(struct rig *r, int model)
 		// Addition 7 (2026-11-15, not in wfview): RX Mode at High at the least. At the
 		// rig files' Medium it came round every several seconds (one Medium turn in 23
 		// ticks, shared by some fifteen items): a mode, DATA or filter change made on the
-		// rig, or on the sub (no broadcast), showed late. High: about once a second
-		if (strcmp(p->command, "RX Mode") == 0 && prio > RIG_PRIO_HIGH)
+		// rig, or on the sub (no broadcast), showed late. High: about once a second.
+		// 2026-11-18: the frequencies too (the sub's has no broadcast either; its marker
+		// lagged by seconds), and the IC-9700's Selected / Unselected pairs
+		if (fast_poll(p->command) && prio > RIG_PRIO_HIGH)
 			prio = RIG_PRIO_HIGH;
 
 		if (p->vfo == -1) {
