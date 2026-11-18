@@ -42,6 +42,7 @@
 //
 static const uint32_t C_STEPS[] = { 1, 10, 50, 100, 500, 1000, 2500, 5000, 9000, 10000, 12500, 25000, 100000 };
 #define C_N_STEPS	(sizeof(C_STEPS) / sizeof(C_STEPS[0]))
+#define C_MODE_STEPS	32	/* modes (rig file numbers) with a step of their own */
 
 // The rig-name menu lines
 enum { MENU_POWER_ON, MENU_POWER_OFF, MENU_TONE, MENU_AUDIO, MENU_N };
@@ -149,6 +150,13 @@ static struct {
 	uint32_t ovr_prev;	/* overrun frames a second ago: NO OUTPUT */
 	uint32_t ovr_t;
 	bool no_output;
+	uint32_t mode_step[C_MODE_STEPS];	/* the step kept per mode (0 none) */
+	int last_mode;		/* the mode the step last followed */
+	uint64_t band_hz[RIG_MAX_BANDS];	/* the last frequency per band (the rig file's) */
+	lv_obj_t *l_left;	/* the arrows beside the frequency */
+	lv_obj_t *l_right;
+	lv_obj_t *l_band;	/* the band button in the mode row */
+	lv_obj_t *l_sql;	/* SQL in the AGC row */
 	bool ptt_held;
 
 	// The tuner asked often for a while after a press (ATU in / out, tune): atu_*
@@ -309,9 +317,201 @@ static void on_filter(lv_event_t *e)
 
 static void on_step_chosen(int idx, void *ud)
 {
+	const struct radio_mode *m = &G.st.rx[0].mode[0];
+
 	(void)ud;
-	if (idx >= 0 && (size_t)idx < C_N_STEPS)
+	if (idx >= 0 && (size_t)idx < C_N_STEPS) {
 		G.ops.set_step(G.ops.ctx, C_STEPS[idx]);
+		// Kept for this mode (2026-11-18): back when the mode comes back
+		if (m->valid && m->num >= 0 && m->num < C_MODE_STEPS)
+			G.mode_step[m->num] = C_STEPS[idx];
+	}
+}
+
+// A mode change (here or on the rig): the step kept for that mode, if any
+static void mode_step_follow(void)
+{
+	const struct radio_mode *m = &G.st.rx[0].mode[0];
+
+	if (!m->valid || m->num == G.last_mode)
+		return;
+	G.last_mode = m->num;
+	if (m->num >= 0 && m->num < C_MODE_STEPS && G.mode_step[m->num] != 0)
+		G.ops.set_step(G.ops.ctx, G.mode_step[m->num]);
+}
+
+//
+// Filter width (2026-11-18): a long press on FIL1 / 2 / 3, the width of that filter in
+// the current mode (Filter Width, the rig's 1A 03). The widths the rig takes, at most
+// UI_CHOOSER_MAX: 50-500 Hz by 50, 600-3600 by 200; AM 200-10000 by 400. Not in FM
+//
+
+static uint32_t G_FW[UI_CHOOSER_MAX];
+static size_t G_FW_N;
+
+static void on_width_chosen(int idx, void *ud)
+{
+	(void)ud;
+	if (idx >= 0 && (size_t)idx < G_FW_N)
+		G.ops.set_value(G.ops.ctx, "Filter Width", (int)G_FW[idx]);
+}
+
+static void on_filter_long(lv_event_t *e)
+{
+	static char texts[UI_CHOOSER_MAX][16];
+	const char *names[UI_CHOOSER_MAX];
+	const struct radio_mode *m = &G.st.rx[0].mode[0];
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const bool am = m->valid && strcmp(m->name, "AM") == 0;
+	char title[128];
+	int sel = -1;
+	uint32_t w;
+	size_t i;
+
+	(void)e;
+	if (!m->valid || r == NULL || rigfile_cmd(r, "Filter Width") == NULL || strstr(m->name, "FM") != NULL)
+		return;
+
+	G_FW_N = 0;
+	if (am) {
+		for (w = 200; w <= 10000 && G_FW_N < UI_CHOOSER_MAX; w += 400)
+			G_FW[G_FW_N++] = w;
+	} else {
+		for (w = 50; w <= 500; w += 50)
+			G_FW[G_FW_N++] = w;
+		for (w = 600; w <= 3600 && G_FW_N < UI_CHOOSER_MAX; w += 200)
+			G_FW[G_FW_N++] = w;
+	}
+	for (i = 0; i < G_FW_N; i++) {
+		snprintf(texts[i], sizeof(texts[i]), "%u Hz", (unsigned int)G_FW[i]);
+		names[i] = texts[i];
+		if (G.st.filter_width.valid && (int)G_FW[i] == G.st.filter_width.value)
+			sel = (int)i;
+	}
+	snprintf(title, sizeof(title), "%s width (%s)", m->filter_name[0] != '\0' ? m->filter_name : "Filter", m->name);
+	ui_chooser_open(title, names, G_FW_N, sel, on_width_chosen, NULL);
+}
+
+//
+// Squelch (2026-11-18): SQL in the AGC row, a tap: the slider (Squelch, 0-255)
+//
+
+static void on_sql_changed(int value, void *ud)
+{
+	(void)ud;
+	G.ops.set_value(G.ops.ctx, "Squelch", value);
+}
+
+static void on_sql(lv_event_t *e)
+{
+	(void)e;
+	ui_slider_open("Squelch", 0, 255, G.st.squelch.valid ? G.st.squelch.value : 0, on_sql_changed, NULL);
+}
+
+//
+// Bands (2026-11-18): the band button in the mode row, the rig file's bands (one per
+// name); each band keeps the last frequency used in it, else its start
+//
+
+static int G_BAND_IDX[UI_CHOOSER_MAX];	/* the chooser line -> the rig file's band */
+static size_t G_BAND_N;
+
+static int band_of(uint64_t hz)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	size_t i;
+
+	if (r == NULL)
+		return -1;
+	for (i = 0; i < r->n_bands && i < RIG_MAX_BANDS; i++)
+		if (hz >= r->bands[i].start && hz <= r->bands[i].end)
+			return (int)i;
+	return -1;
+}
+
+static void on_band_chosen(int idx, void *ud)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	int b;
+
+	(void)ud;
+	if (r == NULL || idx < 0 || (size_t)idx >= G_BAND_N)
+		return;
+	b = G_BAND_IDX[idx];
+	G.ops.set_freq(G.ops.ctx, G.band_hz[b] != 0 ? G.band_hz[b] : r->bands[b].start);
+}
+
+static void on_band(lv_event_t *e)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const char *names[UI_CHOOSER_MAX];
+	const int cur = G.st.rx[0].freq_valid[0] ? band_of(G.st.rx[0].freq_hz[0]) : -1;
+	int sel = -1;
+	size_t i;
+	size_t j;
+
+	(void)e;
+	if (r == NULL || r->n_bands == 0)
+		return;
+	G_BAND_N = 0;
+	for (i = 0; i < r->n_bands && i < RIG_MAX_BANDS && G_BAND_N < UI_CHOOSER_MAX; i++) {
+		bool dup = false;
+
+		for (j = 0; j < G_BAND_N; j++)
+			if (strcmp(r->bands[G_BAND_IDX[j]].name, r->bands[i].name) == 0)
+				dup = true;
+		if (dup || r->bands[i].name[0] == '\0')
+			continue;
+		if (cur >= 0 && strcmp(r->bands[i].name, r->bands[cur].name) == 0)
+			sel = (int)G_BAND_N;
+		G_BAND_IDX[G_BAND_N] = (int)i;
+		names[G_BAND_N++] = r->bands[i].name;
+	}
+	ui_chooser_open("Band", names, G_BAND_N, sel, on_band_chosen, NULL);
+}
+
+//
+// The frequency (2026-11-18): a tap on the upper half of a digit adds one there, on the
+// lower half takes one off; a long press opens the keypad. The arrows left and right:
+// a tuning step down / up, repeating while held
+//
+
+static void on_freq_digit(lv_event_t *e)
+{
+	lv_indev_t *in = lv_indev_active();
+	const char *txt = lv_label_get_text(G.l_freq);
+	lv_point_t p;
+	lv_point_t rel;
+	lv_area_t a;
+	uint64_t f = G.st.rx[0].freq_hz[0];
+	uint64_t step = 1;
+	uint32_t i;
+	size_t k;
+
+	(void)e;
+	if (in == NULL || !G.st.rx[0].freq_valid[0] || G.ops.get_lock(G.ops.ctx))
+		return;
+	lv_indev_get_point(in, &p);
+	lv_obj_get_coords(G.l_freq, &a);
+	rel.x = p.x - a.x1;
+	rel.y = p.y - a.y1;
+	i = lv_label_get_letter_on(G.l_freq, &rel, false);
+	if (i >= strlen(txt) || txt[i] < '0' || txt[i] > '9')
+		return;
+	for (k = i + 1; txt[k] != '\0'; k++)
+		if (txt[k] >= '0' && txt[k] <= '9')
+			step *= 10;
+	if (rel.y < (a.y2 - a.y1) / 2)
+		f += step;
+	else if (f > step)
+		f -= step;
+	G.ops.set_freq(G.ops.ctx, f);
+}
+
+static void on_freq_arrow(lv_event_t *e)
+{
+	if (!G.ops.get_lock(G.ops.ctx))
+		G.ops.tune(G.ops.ctx, lv_event_get_target(e) == G.l_left ? -1 : 1);
 }
 
 static void on_step(lv_event_t *e)
@@ -889,8 +1089,27 @@ static void build_freq(lv_obj_t *scr)
 {
 	lv_obj_t *r = box(scr, U(76), C_BG);
 
-	G.l_freq = tap_label(r, G.f_freq, C_FREQ, "-.---.---", on_freq);
+	// The digits: a tap on a digit's upper / lower half adds / takes one there, a long
+	// press opens the keypad (2026-11-18; was a tap)
+	G.l_freq = label(r, G.f_freq, C_FREQ, "-.---.---");
+	lv_obj_add_flag(G.l_freq, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_event_cb(G.l_freq, on_freq_digit, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.l_freq, on_freq, LV_EVENT_LONG_PRESSED, NULL);
 	lv_obj_center(G.l_freq);
+
+	// The arrows: a tuning step down / up, repeating while held
+	G.l_left = label(r, G.f_freq, C_DIM, "<");
+	G.l_right = label(r, G.f_freq, C_DIM, ">");
+	lv_obj_align(G.l_left, LV_ALIGN_LEFT_MID, U(6), 0);
+	lv_obj_align(G.l_right, LV_ALIGN_RIGHT_MID, -U(6), 0);
+	lv_obj_add_flag(G.l_left, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_add_flag(G.l_right, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_ext_click_area(G.l_left, U(10));
+	lv_obj_set_ext_click_area(G.l_right, U(10));
+	lv_obj_add_event_cb(G.l_left, on_freq_arrow, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.l_left, on_freq_arrow, LV_EVENT_LONG_PRESSED_REPEAT, NULL);
+	lv_obj_add_event_cb(G.l_right, on_freq_arrow, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.l_right, on_freq_arrow, LV_EVENT_LONG_PRESSED_REPEAT, NULL);
 	// MAIN / SUB: the active receiver, top left of the frequency box (dual watch rigs)
 	G.l_active = label(r, G.f_small, C_DIM, "");
 	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(8), U(2));
@@ -898,8 +1117,14 @@ static void build_freq(lv_obj_t *scr)
 
 	r = row(scr, U(32));
 	G.l_mode = tap_label(r, G.f_large, C_ACCENT, "---", on_mode);
-	G.l_filter = tap_label(r, G.f_large, C_ACCENT, "FIL-", on_filter);
+	// FIL: a tap the next filter, a long press its width (short click: no cycle after it)
+	G.l_filter = label(r, G.f_large, C_ACCENT, "FIL-");
+	lv_obj_add_flag(G.l_filter, LV_OBJ_FLAG_CLICKABLE);
+	lv_obj_set_ext_click_area(G.l_filter, U(8));
+	lv_obj_add_event_cb(G.l_filter, on_filter, LV_EVENT_SHORT_CLICKED, NULL);
+	lv_obj_add_event_cb(G.l_filter, on_filter_long, LV_EVENT_LONG_PRESSED, NULL);
 	G.l_step = tap_label(r, G.f_large, C_ACCENT, "STEP", on_step);
+	G.l_band = tap_label(r, G.f_large, C_ACCENT, "BAND", on_band);
 
 	r = row(scr, U(28));
 	G.l_agc = tap_label(r, G.f_med, C_TEXT, "", on_agc);
@@ -907,6 +1132,8 @@ static void build_freq(lv_obj_t *scr)
 	G.l_pre = tap_label(r, G.f_med, C_TEXT, "", on_pre);
 	G.l_dw = tap_label(r, G.f_med, C_DIM, "", on_dw);
 	lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
+	G.l_sql = tap_label(r, G.f_med, C_DIM, "", on_sql);
+	lv_obj_add_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
 	G.l_split = label(r, G.f_med, C_AMBER, "");
 }
 
@@ -1151,8 +1378,21 @@ static void update_lines(void)
 		snprintf(buf, sizeof(buf), "%s", m->filter_name[0] != '\0' ? m->filter_name : "FIL");
 		set_text_if(G.l_filter, buf);
 	}
+	mode_step_follow();
 	fmt_step(buf, sizeof(buf), G.ops.get_step(G.ops.ctx));
 	set_text_if(G.l_step, buf);
+
+	// The band: its name (BAND outside the rig file's bands), its last frequency kept
+	{
+		const int b = rx->freq_valid[0] ? band_of(rx->freq_hz[0]) : -1;
+
+		if (b >= 0) {
+			G.band_hz[b] = rx->freq_hz[0];
+			set_text_if(G.l_band, r->bands[b].name);
+		} else {
+			set_text_if(G.l_band, "BAND");
+		}
+	}
 
 	// AGC, attenuator, preamp, split: hidden when the rig has none
 	if (G.st.agc.valid) {
@@ -1186,6 +1426,16 @@ static void update_lines(void)
 	}
 
 	set_text_if(G.l_split, G.st.split.valid && G.st.split.value ? "SPLIT" : "");
+
+	// Squelch: SQL and its level in %, amber while set (rigs with the command)
+	if (r != NULL && rigfile_cmd(r, "Squelch") != NULL && G.st.squelch.valid) {
+		snprintf(buf, sizeof(buf), G.st.squelch.value ? "SQL %d" : "SQL OFF", G.st.squelch.value * 100 / 255);
+		set_text_if(G.l_sql, buf);
+		lv_obj_set_style_text_color(G.l_sql, lv_color_hex(G.st.squelch.value ? C_AMBER : C_DIM), 0);
+		lv_obj_remove_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
+	}
 
 	// Dual watch: DW dim while off, amber while on; only for a rig with two receivers
 	// and the command. The other receiver (Icom 25 01 / 26 01: the unselected one, the
@@ -1378,14 +1628,15 @@ static void update_markers(void)
 	// The active one, and the other where it is known and wanted
 	mk[second ? 1 : 0].on = true;
 	mk[second ? 1 : 0].hz = r0->freq_hz[0];
-	if (other_ok && (dw || split)) {
+	// The other one whenever it is known, T always: on the other one with split, else on
+	// the active one (2026-11-18: with DW / split only, S and T were hardly ever seen)
+	(void)dw;
+	if (other_ok) {
 		mk[second ? 0 : 1].on = true;
 		mk[second ? 0 : 1].hz = other;
 	}
-	if (other_ok && split) {
-		mk[2].on = true;
-		mk[2].hz = other;
-	}
+	mk[2].on = true;
+	mk[2].hz = other_ok && split ? other : r0->freq_hz[0];
 	ui_scope_set_markers(&G.scope, mk);
 }
 

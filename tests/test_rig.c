@@ -501,6 +501,29 @@ static void test_controls(void)
 	CHECK(sent_bytes(C_SMODE, sizeof(C_SMODE)));
 	CHECK(sent_bytes(C_SPAN_GET, sizeof(C_SPAN_GET)));
 
+	// Filter width (2026-11-18): Hz to the rig's index for the mode: 2400 Hz in USB is 28,
+	// 300 Hz is 5; in AM 6000 Hz is 29
+	{
+		static const uint8_t C_FW2400[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1a, 0x03, 0x28, 0xfd };
+		static const uint8_t C_FW300[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1a, 0x03, 0x05, 0xfd };
+		static const uint8_t C_FW6000[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x1a, 0x03, 0x29, 0xfd };
+
+		G.n = 0;
+		G_RIG.st.rx[0].mode[0].valid = true;
+		snprintf(G_RIG.st.rx[0].mode[0].name, sizeof(G_RIG.st.rx[0].mode[0].name), "%s", "USB");
+		CHECK(rig_set_value(&G_RIG, "Filter Width", 0, 2400) == 0);
+		drain(&t);	/* a second set of the same command would replace the first */
+		CHECK(rig_set_value(&G_RIG, "Filter Width", 0, 300) == 0);
+		drain(&t);
+		CHECK(sent_bytes(C_FW2400, sizeof(C_FW2400)));
+		CHECK(sent_bytes(C_FW300, sizeof(C_FW300)));
+		G.n = 0;
+		snprintf(G_RIG.st.rx[0].mode[0].name, sizeof(G_RIG.st.rx[0].mode[0].name), "%s", "AM");
+		CHECK(rig_set_value(&G_RIG, "Filter Width", 0, 6000) == 0);
+		drain(&t);
+		CHECK(sent_bytes(C_FW6000, sizeof(C_FW6000)));
+	}
+
 	// PTT (1C 00, Immediate, not unique) and ATU tune (1C 01 02)
 	G.n = 0;
 	CHECK(rig_has_ptt(&G_RIG));

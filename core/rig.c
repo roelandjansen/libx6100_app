@@ -1367,6 +1367,23 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 			return RIG_ERR_RANGE;
 		val[n++] = bcd_encode_char(value);
 		break;
+	case K_FILTER_WIDTH: {
+		// The width in Hz to the rig's index, as the decode above (2026-11-18): AM 200 Hz
+		// steps from 200, else 50 Hz steps to 500, then 100 Hz steps from 600
+		const struct radio_mode *m = &r->st.rx[0].mode[0];
+		int idx;
+
+		if (m->valid && strcmp(m->name, "AM") == 0)
+			idx = (value - 200 + 100) / 200;
+		else if (value <= 500)
+			idx = (value - 50 + 25) / 50;
+		else
+			idx = 10 + (value - 600 + 50) / 100;
+		if (idx < 0 || idx > 49)
+			return RIG_ERR_RANGE;
+		val[n++] = bcd_encode_char(idx);
+		break;
+	}
 	case K_BCD2:
 		// ushort: bcdEncodeInt
 		n = bcd_encode_int(value, val);
