@@ -216,7 +216,6 @@ void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark
 	for (p = 0; p < 3; p++) {
 		const int k = prio[p];
 		const int32_t x = hz_to_x(sc, mark[k].hz);
-		char t[2] = { mark[k].tag, '\0' };
 		bool shared = false;
 		int q;
 
@@ -244,7 +243,22 @@ void ui_scope_set_markers(struct ui_scope *sc, const struct ui_scope_marker mark
 		if (shared)
 			continue;
 
-		lv_label_set_text(sc->l_tag[k], t);
+		// The tag names every marker on this column, in the order M / A, S / B, T
+		// (2026-11-18: one letter only, T, hid the M under it)
+		{
+			char all[4];
+			size_t na = 0;
+			int j;
+
+			for (j = 0; j < 3; j++) {
+				const int32_t xj = hz_to_x(sc, mark[j].hz);
+
+				if (mark[j].on && xj >= 0 && xj < w && abs(xj - x) <= 2)
+					all[na++] = mark[j].tag;
+			}
+			all[na] = '\0';
+			lv_label_set_text(sc->l_tag[k], all);
+		}
 		lv_obj_set_style_bg_color(sc->l_tag[k], lv_color_hex(mark[k].color), 0);
 		lv_obj_update_layout(sc->l_tag[k]);
 		{

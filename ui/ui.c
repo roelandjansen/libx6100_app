@@ -1608,9 +1608,14 @@ static void update_markers(void)
 	bool other_ok = false;
 	uint64_t other = 0;
 
-	if (ms && G.st.rx[1].freq_valid[0]) {
-		other = G.st.rx[1].freq_hz[0];
-		other_ok = true;
+	// The other one: on a main / sub rig the second receiver only (RX Frequency); its
+	// Unselected Freq can be the other VFO of the same receiver (IC-9700), and S stood on
+	// M (2026-11-18). On an A / B rig the unselected VFO
+	if (ms) {
+		if (G.st.rx[1].freq_valid[0]) {
+			other = G.st.rx[1].freq_hz[0];
+			other_ok = true;
+		}
 	} else if (r0->freq_valid[1]) {
 		other = r0->freq_hz[1];
 		other_ok = true;
