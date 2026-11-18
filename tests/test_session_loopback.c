@@ -47,6 +47,7 @@ struct fake_server {
 	int busy_logins;	/* answer "busy, our own name" to this many logins */
 	int mod_value;		/* the rig's DATA OFF MOD (X6100.rig: 0 MIC, 3 LAN) */
 	int mod_sets;		/* sets of it received */
+	int no_audio;		/* send CI-V only, no audio data */
 };
 
 static int srv_socket(uint16_t *port)
@@ -231,7 +232,7 @@ static void srv_send_data(struct fake_server *f)
 		srv_send(f, 1, p, 0x15 + sizeof(civ), 1);
 	}
 
-	if (f->have_peer[2]) {
+	if (f->have_peer[2] && !f->no_audio) {
 		srv_hdr(p, 0x18 + 0x20, 0);
 		memset(p + 0x18, 0x40, 0x20);
 		srv_send(f, 2, p, 0x18 + 0x20, 1);
@@ -390,6 +391,21 @@ int main(void)
 	CHECK(f.got_login == 3);
 	CHECK(f.got_token_remove == 2);
 	CHECK(f.busy_logins == 0);
+
+	// The rig stops its audio, CI-V goes on (2026-11-18): lost after 5 s, the reason in
+	// the status (the app connects again on a lost link)
+	f.no_audio = 1;
+	until = clock_mono_ms() + 8000;
+	while (clock_mono_ms() < until) {
+		srv_poll(&f, 20);
+		srv_send_data(&f);
+		session_get_info(s, &info);
+		if (info.state == SESSION_LOST)
+			break;
+	}
+	CHECK(info.state == SESSION_LOST);
+	CHECK(strcmp(info.status, "No audio from the radio") == 0);
+	f.no_audio = 0;
 	session_disconnect(s);
 
 	// Second run: server rejects the login; reason and wfview's text must reach the snapshot

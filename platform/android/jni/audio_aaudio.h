@@ -22,6 +22,7 @@ void audio_aa_set_voice(bool voice);	/* before opening: Bluetooth headset in cal
 int audio_aa_open_playback(void);
 int audio_aa_open_capture(void);
 void audio_aa_attach(struct session *s);
+void audio_aa_detach(void);	/* before a disconnect: the callbacks off the session */
 void audio_aa_close(void);
 
 //

@@ -32,6 +32,7 @@
 
 #define C_POLL_MAX_MS		500
 #define C_LINK_LOSS_MS		(PROTO_STALE_CONNECTION_S * 1000)
+#define C_AUDIO_LOSS_MS		5000	/* no audio data this long (not around TX): the link lost (2026-11-18) */
 #define C_CIV_QUEUE		8192
 #define C_CTL_QUEUE		64
 #define C_TX_POLL_MS		10
@@ -136,6 +137,7 @@ struct session {
 	bool tx_ready;
 	bool ptt;
 	bool rig_tx_prev;
+	int64_t t_tx_last;	/* last seen transmitting (ours or the rig's): the audio check waits after it */
 	int64_t t_ptt_timeout;
 	atomic_llong last_heartbeat;
 	atomic_bool ptt_timeout_en;
@@ -650,11 +652,24 @@ static bool link_lost(struct session *s, int64_t now)
 		return true;
 	}
 
+	// Transmitting (ours or the rig's): the rig may pause the RX audio, so the audio check
+	// waits until C_AUDIO_LOSS_MS after it
+	if (s->ptt || (s->rig.st.transmit.valid && s->rig.st.transmit.value != 0))
+		s->t_tx_last = now;
+
 	if (ctl != 0 && now - ctl > C_LINK_LOSS_MS)
 		what = "control";
 	else if (s->streams_open && now - (s->civ.s.last_rx > s->t_streams_open ?
 			s->civ.s.last_rx : s->t_streams_open) > C_LINK_LOSS_MS)
 		what = "CI-V";
+	// No audio data for C_AUDIO_LOSS_MS while control and CI-V run (2026-11-18: now and then
+	// no audio on every rig, a new connect brought it back): with the rig file in (a rig in
+	// standby sends none), not around TX
+	else if (s->streams_open && s->arx != NULL && s->rig_active && s->rig.st.rig_valid &&
+			now - s->t_tx_last > C_AUDIO_LOSS_MS &&
+			now - (s->audio.last_audio > s->t_streams_open ? s->audio.last_audio : s->t_streams_open) >
+			C_AUDIO_LOSS_MS)
+		what = "audio";
 
 	if (what == NULL)
 		return false;

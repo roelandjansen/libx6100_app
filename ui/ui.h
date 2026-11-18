@@ -117,3 +117,4 @@ void ui_poll(void);
 void ui_set_volume(uint8_t volume);
 void ui_release_ptt(void);
 void ui_ops_from_session(struct ui_ops *ops, struct session *s);
+void ui_set_ctx(void *ctx);	/* a new session for the same screen (reconnect) */

@@ -12,6 +12,8 @@
 
 #include <stdatomic.h>
 #include <stddef.h>
+#include <string.h>
+#include <time.h>
 
 #include <aaudio/AAudio.h>
 #include <android/log.h>
@@ -29,23 +31,37 @@ static atomic_bool G_IN_ERR;
 static atomic_bool G_IN_LOST;
 static _Atomic(struct session *) G_SESSION;
 
+// Callbacks running now: a detach (a reconnect, 2026-11-18) waits until none uses the
+// session it takes away. Counted before the session is looked at
+static atomic_int G_BUSY;
+
 static aaudio_data_callback_result_t out_cb(AAudioStream *st, void *ud, void *data, int32_t frames)
 {
-	struct session *s = atomic_load_explicit(&G_SESSION, memory_order_acquire);
+	struct session *s;
 
 	(void)st;
 	(void)ud;
-	session_audio_read(s, data, (size_t)frames);
+	atomic_fetch_add(&G_BUSY, 1);
+	s = atomic_load_explicit(&G_SESSION, memory_order_acquire);
+	if (s != NULL)
+		session_audio_read(s, data, (size_t)frames);
+	else
+		memset(data, 0, (size_t)frames * 2 * sizeof(float));	/* no session: silence */
+	atomic_fetch_sub(&G_BUSY, 1);
 	return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
 static aaudio_data_callback_result_t in_cb(AAudioStream *st, void *ud, void *data, int32_t frames)
 {
-	struct session *s = atomic_load_explicit(&G_SESSION, memory_order_acquire);
+	struct session *s;
 
 	(void)st;
 	(void)ud;
-	tx_capture_write(s, data, (size_t)frames, 1);
+	atomic_fetch_add(&G_BUSY, 1);
+	s = atomic_load_explicit(&G_SESSION, memory_order_acquire);
+	if (s != NULL)
+		tx_capture_write(s, data, (size_t)frames, 1);
+	atomic_fetch_sub(&G_BUSY, 1);
 	return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
 
@@ -129,6 +145,17 @@ int audio_aa_open_capture(void)
 	G_IN = open_stream(true);
 	G_WANT_IN = G_IN != NULL;
 	return G_IN != NULL ? 0 : -1;
+}
+
+// The session away from the callbacks (before it is disconnected): the streams go on,
+// with silence; returns once no callback uses it any more
+void audio_aa_detach(void)
+{
+	const struct timespec ms = { 0, 1000000 };
+
+	atomic_store_explicit(&G_SESSION, NULL, memory_order_release);
+	while (atomic_load(&G_BUSY) != 0)
+		nanosleep(&ms, NULL);
 }
 
 void audio_aa_attach(struct session *s)

@@ -44,6 +44,12 @@ static struct {
 	bool mic_allowed;
 
 	//
+	// Reconnect after a lost link (watch_link)
+	//
+	uint32_t t_lost;
+	bool reconnecting;
+
+	//
 	// Main thread -> render thread handover (lock)
 	//
 	pthread_mutex_t lock;
@@ -385,6 +391,65 @@ static void start_session(void)
 	ui_ops_from_session(&G.ops, G.s);
 }
 
+//
+// A lost link (or the radio gone): connect again after C_RECONNECT_MS (2026-11-18), as a
+// new connect by hand did. The audio callbacks leave the old session first, the screen
+// keeps going on the new one (ui_set_ctx); a connect that fails is tried again
+//
+
+#define C_RECONNECT_MS	2000u
+
+static void reconnect_session(void)
+{
+	const struct session_hooks hooks = { on_notify, NULL, NULL, NULL, NULL, NULL };
+	struct session *ns = NULL;
+
+	// The new one first: a failed connect keeps the old (lost) one, tried again later
+	if (session_connect(&ns, &G.prof, &hooks) != 0) {
+		__android_log_print(ANDROID_LOG_ERROR, C_TAG, "reconnect: session_connect failed");
+		return;
+	}
+	if (G.ui_up)
+		ui_release_ptt();
+	audio_aa_detach();
+	if (G.s != NULL)
+		session_disconnect(G.s);
+	G.s = ns;
+	audio_aa_attach(G.s);
+	ui_ops_from_session(&G.ops, G.s);
+	if (G.ui_up)
+		ui_set_ctx(G.s);
+}
+
+static void watch_link(void)
+{
+	const uint32_t t = tick_ms();
+	struct session_info in;
+	bool lost;
+
+	if (G.s == NULL) {
+		lost = G.reconnecting;	/* a reconnect that failed: again */
+	} else {
+		session_get_info(G.s, &in);
+		lost = in.state == SESSION_LOST || in.state == SESSION_RADIO_GONE;
+	}
+
+	if (!lost) {
+		G.t_lost = 0;
+		G.reconnecting = false;
+		return;
+	}
+	if (G.t_lost == 0) {
+		G.t_lost = t != 0 ? t : 1;
+		return;
+	}
+	if (t - G.t_lost >= C_RECONNECT_MS) {
+		G.reconnecting = true;
+		G.t_lost = 0;
+		reconnect_session();
+	}
+}
+
 static void *render_thread(void *arg)
 {
 	ALooper *looper = ALooper_prepare(0);
@@ -409,6 +474,7 @@ static void *render_thread(void *arg)
 			break;
 
 		audio_aa_service();
+		watch_link();
 		if (G.s != NULL && !audio_aa_capture_ok())
 			tx_capture_lost(G.s);
 

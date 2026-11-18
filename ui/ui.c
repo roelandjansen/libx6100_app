@@ -144,6 +144,11 @@ static struct {
 	bool muted;		/* the VOL tap: RX silent, silence in place of the mic */
 	bool vfo_b[2];		/* VFO B selected, per receiver (main, sub: the IC-9700 has A / B on each); from the app, the rig gives no read-back */
 	lv_obj_t *l_utc;	/* UTC date and time in the status bar */
+	uint32_t aud_pk;	/* audio packets as last seen, and when they last moved */
+	uint32_t aud_t;
+	uint32_t ovr_prev;	/* overrun frames a second ago: NO OUTPUT */
+	uint32_t ovr_t;
+	bool no_output;
 	bool ptt_held;
 
 	// The tuner asked often for a while after a press (ATU in / out, tune): atu_*
@@ -1101,10 +1106,36 @@ static void update_lines(void)
 	set_text_if(G.l_rxtx, tx ? "TX" : "RX");
 	lv_obj_set_style_text_color(G.l_rxtx, lv_color_hex(tx ? C_RED : C_GREEN), 0);
 	set_text_if(G.l_model, G.st.rig_valid ? G.st.model : G.info.radio_name);
-	if (G.info.state == SESSION_CONNECTED)
-		snprintf(buf, sizeof(buf), "%d ms", G.info.audio_latency_ms);
-	else
-		snprintf(buf, sizeof(buf), "%s", session_state_name(G.info.state));
+	// Audio (2026-11-18: now and then none on every rig): NO AUDIO when no packets came for
+	// 2 s (the rig stopped sending), NO OUTPUT when they come but the phone plays none
+	// (the ring overruns at about the full rate); not while transmitting
+	{
+		const uint32_t t = lv_tick_get();
+		bool warn = false;
+
+		if (G.info.audio_packets != G.aud_pk || G.aud_t == 0 || tx || G.info.ptt) {
+			G.aud_pk = G.info.audio_packets;
+			G.aud_t = t;
+		}
+		if ((uint32_t)(t - G.ovr_t) >= 1000u) {
+			G.no_output = G.info.audio_overrun_frames - G.ovr_prev > 20000u;
+			G.ovr_prev = G.info.audio_overrun_frames;
+			G.ovr_t = t;
+		}
+
+		if (G.info.state != SESSION_CONNECTED) {
+			snprintf(buf, sizeof(buf), "%s", session_state_name(G.info.state));
+		} else if ((uint32_t)(t - G.aud_t) > 2000u) {
+			snprintf(buf, sizeof(buf), "%s", "NO AUDIO");
+			warn = true;
+		} else if (G.no_output && !tx) {
+			snprintf(buf, sizeof(buf), "%s", "NO OUTPUT");
+			warn = true;
+		} else {
+			snprintf(buf, sizeof(buf), "%d ms", G.info.audio_latency_ms);
+		}
+		lv_obj_set_style_text_color(G.l_link, lv_color_hex(warn ? C_AMBER : C_DIM), 0);
+	}
 	set_text_if(G.l_link, buf);
 	lv_obj_align_to(G.l_utc, G.l_link, LV_ALIGN_OUT_LEFT_MID, -U(10), 0);	/* UTC left of it */
 
@@ -1356,6 +1387,25 @@ static void update_markers(void)
 		mk[2].hz = other;
 	}
 	ui_scope_set_markers(&G.scope, mk);
+}
+
+//
+// A new session for the same screen (the app's reconnect after a lost link, 2026-11-18):
+// the ops stay, their context changes. What the old session held for the screen is set
+// again (mute) or starts over (audio route, test tone, the audio watch)
+//
+
+void ui_set_ctx(void *ctx)
+{
+	G.ops.ctx = ctx;
+	G.route = 0;		/* AUDIO_ROUTE_AUTO: the new session starts there */
+	G.tone_on = false;
+	G.power_on_sent = false;
+	G.aud_t = 0;
+	if (G.muted)
+		set_mute(true);
+	else
+		G.ops.set_volume(G.ops.ctx, G.volume);
 }
 
 void ui_poll(void)
