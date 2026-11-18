@@ -142,7 +142,7 @@ static struct {
 	bool have_row;
 	uint8_t volume;
 	bool muted;		/* the VOL tap: RX silent, silence in place of the mic */
-	bool vfo_b;		/* VFO B selected (from the app: the rig gives no read-back) */
+	bool vfo_b[2];		/* VFO B selected, per receiver (main, sub: the IC-9700 has A / B on each); from the app, the rig gives no read-back */
 	lv_obj_t *l_utc;	/* UTC date and time in the status bar */
 	bool ptt_held;
 
@@ -801,11 +801,11 @@ static void vfo_text(char *buf, size_t n)
 	const bool split = G.st.split.valid && G.st.split.value;
 
 	if (rig_has_ms() && rig_has_ab())
-		snprintf(buf, n, "%s %s%s", sub ? "SUB" : "MAIN", G.vfo_b ? "B" : "A", split ? " SPLIT" : "");
+		snprintf(buf, n, "%s %s%s", sub ? "SUB" : "MAIN", G.vfo_b[sub ? 1 : 0] ? "B" : "A", split ? " SPLIT" : "");
 	else if (rig_has_ms())
 		snprintf(buf, n, "%s%s", sub ? "SUB" : "MAIN", split ? " SPLIT" : "");
 	else
-		snprintf(buf, n, "VFO %s%s", G.vfo_b ? "B" : "A", split ? " SPLIT" : "");
+		snprintf(buf, n, "VFO %s%s", G.vfo_b[0] ? "B" : "A", split ? " SPLIT" : "");
 }
 
 static const char *const C_VFO_MSAB[] = { "MAIN A", "MAIN B", "SUB A", "SUB B" };
@@ -836,7 +836,7 @@ static void on_vfo_chosen(int idx, void *ud)
 			G.ops.set_value(G.ops.ctx, "Scope Main/Sub", sub);
 	}
 	if (b >= 0 && G.ops.send_cmd != NULL && G.ops.send_cmd(G.ops.ctx, b ? "VFO B Select" : "VFO A Select") == 0)
-		G.vfo_b = b != 0;
+		G.vfo_b[sub >= 0 ? sub : (G.st.rx_selected.valid && G.st.rx_selected.value != 0)] = b != 0;
 }
 
 static void on_vfo(lv_event_t *e)
@@ -846,11 +846,11 @@ static void on_vfo(lv_event_t *e)
 
 	(void)e;
 	if (ms && ab)
-		ui_chooser_open("Receiver / VFO", C_VFO_MSAB, 4, (sub ? 2 : 0) + (G.vfo_b ? 1 : 0), on_vfo_chosen, NULL);
+		ui_chooser_open("Receiver / VFO", C_VFO_MSAB, 4, (sub ? 2 : 0) + (G.vfo_b[sub ? 1 : 0] ? 1 : 0), on_vfo_chosen, NULL);
 	else if (ms)
 		ui_chooser_open("Receiver", C_VFO_MS, 2, sub ? 1 : 0, on_vfo_chosen, NULL);
 	else if (ab)
-		ui_chooser_open("VFO", C_VFO_AB, 2, G.vfo_b ? 1 : 0, on_vfo_chosen, NULL);
+		ui_chooser_open("VFO", C_VFO_AB, 2, G.vfo_b[0] ? 1 : 0, on_vfo_chosen, NULL);
 }
 
 static void build_status(lv_obj_t *scr)
@@ -1316,7 +1316,7 @@ static void update_markers(void)
 {
 	struct ui_scope_marker mk[3];
 	const bool ms = rig_has_ms();
-	const bool second = ms ? G.st.rx_selected.valid && G.st.rx_selected.value != 0 : G.vfo_b;
+	const bool second = ms ? G.st.rx_selected.valid && G.st.rx_selected.value != 0 : G.vfo_b[0];
 	const bool split = G.st.split.valid && G.st.split.value;
 	const bool dw = G.st.dual_watch.valid && G.st.dual_watch.value != 0;
 	const struct radio_rx *r0 = &G.st.rx[0];
