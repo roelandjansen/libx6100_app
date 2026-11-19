@@ -147,6 +147,8 @@ static struct {
 	lv_obj_t *l_utc;	/* UTC date and time in the status bar */
 	uint32_t aud_pk;	/* audio packets as last seen, and when they last moved */
 	uint32_t aud_t;
+	uint32_t aud_dl;	/* ... and those dropped as late, when they last moved: LATE */
+	uint32_t aud_dl_t;
 	uint32_t ovr_prev;	/* overrun frames a second ago: NO OUTPUT */
 	uint32_t ovr_t;
 	bool no_output;
@@ -1334,8 +1336,10 @@ static void update_lines(void)
 	lv_obj_set_style_text_color(G.l_rxtx, lv_color_hex(tx ? C_RED : C_GREEN), 0);
 	set_text_if(G.l_model, G.st.rig_valid ? G.st.model : G.info.radio_name);
 	// Audio (2026-11-18: now and then none on every rig): NO AUDIO when no packets came for
-	// 2 s (the rig stopped sending), NO OUTPUT when they come but the phone plays none
-	// (the ring overruns at about the full rate); not while transmitting
+	// 2 s (the rig stopped sending), LATE when they come but are dropped as late (the
+	// delay estimate; the session starts it afresh after 1 s, 2026-11-19), NO OUTPUT when
+	// they come but the phone plays none (the ring overruns at about the full rate); not
+	// while transmitting
 	{
 		const uint32_t t = lv_tick_get();
 		bool warn = false;
@@ -1343,6 +1347,10 @@ static void update_lines(void)
 		if (G.info.audio_packets != G.aud_pk || G.aud_t == 0 || tx || G.info.ptt) {
 			G.aud_pk = G.info.audio_packets;
 			G.aud_t = t;
+		}
+		if (G.info.audio_dropped_late != G.aud_dl) {
+			G.aud_dl = G.info.audio_dropped_late;
+			G.aud_dl_t = t;
 		}
 		if ((uint32_t)(t - G.ovr_t) >= 1000u) {
 			G.no_output = G.info.audio_overrun_frames - G.ovr_prev > 20000u;
@@ -1352,6 +1360,9 @@ static void update_lines(void)
 
 		if (G.info.state != SESSION_CONNECTED) {
 			snprintf(buf, sizeof(buf), "%s", session_state_name(G.info.state));
+		} else if ((uint32_t)(t - G.aud_t) > 500u && G.aud_dl_t != 0 && (uint32_t)(t - G.aud_dl_t) < 1000u) {
+			snprintf(buf, sizeof(buf), "LATE %d ms", G.info.audio_lateness_ms);
+			warn = true;
 		} else if ((uint32_t)(t - G.aud_t) > 2000u) {
 			snprintf(buf, sizeof(buf), "%s", "NO AUDIO");
 			warn = true;

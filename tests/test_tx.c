@@ -286,6 +286,40 @@ static void test_packets(void)
 	audio_stream_close(&a);
 }
 
+//
+// A delay estimate stuck high (every packet dropped as late) starts afresh after 1 s
+// (2026-11-19)
+//
+
+static void test_late_reset(void)
+{
+	static struct audio_stream a;
+	uint8_t pkt[AUDIO_HEADER + 160];
+	const struct udp_io io = { net_send, net_day_ms, NULL };
+	const struct audio_rx_events ev = { ev_none, ev_none, NULL, NULL };
+	int64_t t;
+	uint16_t seq = 1;
+
+	audio_stream_init(&a, &io, 0x11223344u, &ev, 150, 0);
+	a.s.remote_id = 0x55667788u;
+	memset(pkt, 0, sizeof(pkt));
+	proto_put_le32(pkt + PROTO_OFF_LEN, sizeof(pkt));
+	a.s.ping_lateness_ms = 10000;
+
+	for (t = 100; t < 1000; t += 20) {
+		proto_put_le16(pkt + PROTO_OFF_SEQ, seq++);
+		audio_stream_receive(&a, pkt, sizeof(pkt), t);
+	}
+	CHECK(a.packets_rx == 0 && a.dropped_late == 45 && a.late_resets == 0);
+
+	for (; t < 1300; t += 20) {
+		proto_put_le16(pkt + PROTO_OFF_SEQ, seq++);
+		audio_stream_receive(&a, pkt, sizeof(pkt), t);
+	}
+	CHECK(a.late_resets == 1 && a.packets_rx > 0 && a.s.ping_lateness_ms == 0);
+	audio_stream_close(&a);
+}
+
 int main(void)
 {
 	test_codecs();
@@ -294,6 +328,7 @@ int main(void)
 	test_tone();
 	test_ulaw();
 	test_packets();
+	test_late_reset();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_tx: %d failure(s)\n", G_FAILS);

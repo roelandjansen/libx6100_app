@@ -441,6 +441,14 @@ static void watch_link(void)
 	}
 	if (G.t_lost == 0) {
 		G.t_lost = t != 0 ? t : 1;
+		// Why, for adb logcat (2026-11-19: "no audio" now and then)
+		if (G.s != NULL)
+			__android_log_print(ANDROID_LOG_WARN, C_TAG,
+					"link lost: %s; audio packets %u, dropped late %u, lateness %d ms, "
+					"underruns %u, overrun frames %u; reconnect in %d ms",
+					in.status, (unsigned)in.audio_packets, (unsigned)in.audio_dropped_late,
+					in.audio_lateness_ms, (unsigned)in.audio_underruns,
+					(unsigned)in.audio_overrun_frames, C_RECONNECT_MS);
 		return;
 	}
 	if (t - G.t_lost >= C_RECONNECT_MS) {

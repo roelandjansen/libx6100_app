@@ -13,6 +13,8 @@
 
 #include "core/ping_delay.h"
 
+#define C_LATE_RESET_MS	1000	/* all audio dropped as late this long: the delay estimate starts afresh */
+
 //
 // Start the player; as wfview startAudio() this also sends are-you-there
 //
@@ -64,9 +66,23 @@ void audio_stream_receive(struct audio_stream *a, const uint8_t *buf, size_t len
 		if (!a->playing)
 			start_audio(a, now_ms, true);
 
+		// Late audio is dropped (wfview). Addition (2026-11-19, not in wfview): when every
+		// packet has been dropped for C_LATE_RESET_MS the estimate is taken as stuck (a
+		// step of the rig's clock in its ping stamps, a stall: up to two 10 s windows of
+		// silence, now and then "no audio" until a new connect) and starts afresh
+		if (a->s.ping_lateness_ms > ping_delay_drop_threshold_ms(a->rx_latency_ms) && a->t_late_since == 0)
+			a->t_late_since = now_ms;
+		if (a->t_late_since != 0 && now_ms - a->t_late_since >= C_LATE_RESET_MS) {
+			ping_delay_reset(&a->s.ping_delay);
+			a->s.ping_lateness_ms = 0;
+			a->t_late_since = 0;
+			a->late_resets++;
+		}
+
 		if (a->s.ping_lateness_ms > ping_delay_drop_threshold_ms(a->rx_latency_ms)) {
 			a->dropped_late++;
 		} else {
+			a->t_late_since = 0;
 			a->packets_rx++;
 			if (a->ev.data != NULL)
 				a->ev.data(a->ev.ctx, ((uint32_t)a->seq_prefix << 16) | seq,

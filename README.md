@@ -100,6 +100,7 @@ wfview main is the reference for protocol, timing and behaviour. Where this clie
 10. A radio busy without another client (our own earlier session still closing) is logged out of and into again, at least 1 s apart, up to 10 times.
 11. RX Mode and RX Frequency (IC-9700: Selected / Unselected Freq and Mode) are polled at High at the least (the rig files have Medium): a mode, DATA or filter change made on the rig, or the sub's frequency (no broadcast for the sub), showed only after several seconds. And a change of the active receiver (VFO Main/Sub Band) asks both receivers' frequency and mode at once.
 12. No audio data for 5 s while control and CI-V run (with the rig file in, not around TX) counts as a lost link: "No audio from the radio". The app and x6100_trx connect again 2 s after a lost link (the new session first; the old stays until that works).
+13. RX audio dropped as late (the ping delay estimate, as wfview) for 1 s without a break: the estimate starts afresh. Stuck high (a step of the rig's clock in its ping stamps, a stall) it dropped all audio for up to 20 s, now and then until a new connect. The status bar shows LATE while audio is dropped this way.
 
 ## To do
 

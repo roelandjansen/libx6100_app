@@ -60,12 +60,14 @@ struct audio_stream {
 	int64_t last_audio;
 	int64_t t_watchdog;
 	bool alerted;
+	int64_t t_late_since;	/* every packet dropped as late since then (0 none): the delay estimate is reset after C_LATE_RESET_MS */
 
 	//
 	// Stats
 	//
 	uint32_t packets_rx;
 	uint32_t dropped_late;
+	uint32_t late_resets;	/* delay estimate resets (stuck high) */
 
 	//
 	// TX (sendAudioSeq and counters)
