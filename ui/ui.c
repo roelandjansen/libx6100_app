@@ -152,6 +152,8 @@ static struct {
 	uint32_t aud_t;
 	uint32_t aud_dl;	/* ... and those dropped as late, when they last moved: LATE */
 	uint32_t aud_dl_t;
+	bool ptt_was;		/* our PTT as last seen, and when we let it go: the display back to RX at once */
+	uint32_t ptt_release_t;
 	uint32_t ovr_prev;	/* overrun frames a second ago: NO OUTPUT */
 	uint32_t ovr_t;
 	bool no_output;
@@ -1459,7 +1461,13 @@ static void update_lines(void)
 	// band show the TX side, as the rig and x6100_trx do (2026-11-20); the step per mode
 	// and the band's last frequency stay with the receiver
 	uint64_t tx_hz = 0;
-	const bool show_tx = (tx || G.info.ptt) && G.st.split.valid && G.st.split.value && other_freq(&tx_hz);
+	// Our PTT let go: the RX side at once, not when the rig's TX state is polled a moment
+	// later (2026-11-20); TX keyed at the rig or by another client still shows
+	if (G.ptt_was && !G.info.ptt)
+		G.ptt_release_t = lv_tick_get() != 0 ? lv_tick_get() : 1;
+	G.ptt_was = G.info.ptt;
+	const bool tx_shown = G.info.ptt || (tx && (G.ptt_release_t == 0 || lv_tick_get() - G.ptt_release_t >= 1500u));
+	const bool show_tx = tx_shown && G.st.split.valid && G.st.split.value && other_freq(&tx_hz);
 	const struct radio_mode *dm = show_tx && other_mode() != NULL ? other_mode() : m;
 
 	if (show_tx || rx->freq_valid[0]) {
