@@ -129,6 +129,7 @@ static struct {
 	lv_obj_t *l_dw;
 	lv_obj_t *l_sub;	/* the other receiver; a tap makes it the active one (step 2) */
 	lv_obj_t *l_active;	/* MAIN / SUB on the big frequency: the active receiver */
+	lv_obj_t *l_txf;	/* TX n.nnn.nnn on the big frequency, top right, with split (2026-11-20) */
 	uint32_t rxsel_next;	/* next ask of VFO Main/Sub Band */
 	int route;		/* the choice in C_ROUTES: 0 the selected receiver (follows it), else AUDIO_ROUTE_* + 1 */
 	int route_sent;		/* AUDIO_ROUTE_* as last sent to the session, the new session starts at AUTO */
@@ -174,6 +175,8 @@ static int32_t U(float v)
 {
 	return (int32_t)lrintf(v * G.scale);
 }
+
+static bool other_freq(uint64_t *hz);	/* the other receiver / VFO (below) */
 
 //
 // Formatting
@@ -1152,6 +1155,10 @@ static void build_freq(lv_obj_t *scr)
 	G.l_active = label(r, G.f_small, C_DIM, "");
 	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(8), U(2));
 	lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
+	// With split: where TX goes, top right of the frequency box (amber)
+	G.l_txf = label(r, G.f_small, C_AMBER, "");
+	lv_obj_align(G.l_txf, LV_ALIGN_TOP_RIGHT, -U(8), U(2));
+	lv_obj_add_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
 
 	r = row(scr, U(32));
 	G.l_mode = tap_label(r, G.f_large, C_ACCENT, "---", on_mode);
@@ -1474,6 +1481,22 @@ static void update_lines(void)
 
 	set_text_if(G.l_split, G.st.split.valid && G.st.split.value ? "SPLIT" : "");
 
+	// Split: the TX frequency on the frequency box (the other VFO / receiver)
+	{
+		uint64_t txhz = 0;
+
+		if (G.st.split.valid && G.st.split.value && other_freq(&txhz)) {
+			char f[32];
+
+			fmt_freq(f, sizeof(f), txhz);
+			snprintf(buf, sizeof(buf), "TX %s", f);
+			set_text_if(G.l_txf, buf);
+			lv_obj_remove_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
+		} else {
+			lv_obj_add_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
+		}
+	}
+
 	// Squelch: SQL and its level in %, amber while set (rigs with the command)
 	if (r != NULL && rigfile_cmd(r, "Squelch") != NULL && G.st.squelch.valid) {
 		snprintf(buf, sizeof(buf), G.st.squelch.value ? "SQL %d" : "SQL OFF", G.st.squelch.value * 100 / 255);
@@ -1654,6 +1677,24 @@ static void update_overlay(void)
 #define C_MARK_S	0x3CC83C
 #define C_MARK_T	0xF0D020
 
+// The other receiver / VFO's frequency, false while not known. On a main / sub rig the
+// second receiver only (RX Frequency); its Unselected Freq can be the other VFO of the
+// same receiver (IC-9700), and S stood on M (2026-11-18). On an A / B rig the unselected
+// VFO. With split, TX is there (the T marker, the TX line on the frequency box)
+static bool other_freq(uint64_t *hz)
+{
+	if (rig_has_ms()) {
+		if (!G.st.rx[1].freq_valid[0])
+			return false;
+		*hz = G.st.rx[1].freq_hz[0];
+		return true;
+	}
+	if (!G.st.rx[0].freq_valid[1])
+		return false;
+	*hz = G.st.rx[0].freq_hz[1];
+	return true;
+}
+
 static void update_markers(void)
 {
 	struct ui_scope_marker mk[3];
@@ -1662,21 +1703,8 @@ static void update_markers(void)
 	const bool split = G.st.split.valid && G.st.split.value;
 	const bool dw = G.st.dual_watch.valid && G.st.dual_watch.value != 0;
 	const struct radio_rx *r0 = &G.st.rx[0];
-	bool other_ok = false;
 	uint64_t other = 0;
-
-	// The other one: on a main / sub rig the second receiver only (RX Frequency); its
-	// Unselected Freq can be the other VFO of the same receiver (IC-9700), and S stood on
-	// M (2026-11-18). On an A / B rig the unselected VFO
-	if (ms) {
-		if (G.st.rx[1].freq_valid[0]) {
-			other = G.st.rx[1].freq_hz[0];
-			other_ok = true;
-		}
-	} else if (r0->freq_valid[1]) {
-		other = r0->freq_hz[1];
-		other_ok = true;
-	}
+	const bool other_ok = other_freq(&other);
 
 	memset(mk, 0, sizeof(mk));
 	// [0] main / A, [1] sub / B, [2] TX
