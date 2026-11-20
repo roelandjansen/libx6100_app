@@ -160,6 +160,7 @@ static struct {
 	lv_obj_t *l_right;
 	lv_obj_t *l_band;	/* the band button in the mode row */
 	lv_obj_t *l_sql;	/* SQL in the AGC row */
+	lv_obj_t *l_pwr;	/* PWR n % beside the meter: a tap, the RF power slider (2026-11-20) */
 	bool ptt_held;
 
 	// The tuner asked often for a while after a press (ATU in / out, tune): atu_*
@@ -411,6 +412,23 @@ static void on_sql(lv_event_t *e)
 	ui_slider_open("Squelch", 0, 255, G.st.squelch.valid ? G.st.squelch.value : 0, on_sql_changed, NULL);
 }
 
+
+//
+// RF power (2026-11-20: turned down on the rig, 0 % on the IC-7851, and not seen from
+// here): PWR and its level in % beside the meter, a tap the slider (RF Power, 0-255)
+//
+
+static void on_pwr_changed(int value, void *ud)
+{
+	(void)ud;
+	G.ops.set_value(G.ops.ctx, "RF Power", value);
+}
+
+static void on_pwr(lv_event_t *e)
+{
+	(void)e;
+	ui_slider_open("RF power", 0, 255, G.st.rf_power.valid ? G.st.rf_power.value : 0, on_pwr_changed, NULL);
+}
 //
 // Bands (2026-11-18): the band button in the mode row, the rig file's bands (one per
 // name); each band keeps the last frequency used in it, else its start
@@ -1100,6 +1118,9 @@ static void build_meter(lv_obj_t *scr)
 	G.vu = ui_meter_create(p, face_w, G.font.ttf, G.font.len);
 	if (G.vu != NULL)
 		lv_obj_align(ui_meter_obj(G.vu), LV_ALIGN_CENTER, 0, 0);
+	G.l_pwr = tap_label(p, G.f_med, C_DIM, "", on_pwr);
+	lv_obj_align(G.l_pwr, LV_ALIGN_TOP_RIGHT, -U(8), U(6));
+	lv_obj_add_flag(G.l_pwr, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_freq(lv_obj_t *scr)
@@ -1461,6 +1482,18 @@ static void update_lines(void)
 		lv_obj_remove_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
 	} else {
 		lv_obj_add_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
+	}
+
+	// RF power: PWR and its level in %, amber when low (under 10 %; rigs with the command)
+	if (r != NULL && rigfile_cmd(r, "RF Power") != NULL && G.st.rf_power.valid) {
+		const int pct = G.st.rf_power.value * 100 / 255;
+
+		snprintf(buf, sizeof(buf), "PWR %d%%", pct);
+		set_text_if(G.l_pwr, buf);
+		lv_obj_set_style_text_color(G.l_pwr, lv_color_hex(pct < 10 ? C_AMBER : C_ACCENT), 0);
+		lv_obj_remove_flag(G.l_pwr, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(G.l_pwr, LV_OBJ_FLAG_HIDDEN);
 	}
 
 	// Dual watch: DW dim while off, amber while on; only for a rig with two receivers
