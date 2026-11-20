@@ -1437,15 +1437,23 @@ static void update_lines(void)
 	set_text_if(G.l_link, buf);
 	lv_obj_align_to(G.l_utc, G.l_link, LV_ALIGN_OUT_LEFT_MID, -U(10), 0);	/* UTC left of it */
 
-	// Frequency, mode, filter, step
-	if (rx->freq_valid[0]) {
-		fmt_freq(buf, sizeof(buf), rx->freq_hz[0]);
+	// Frequency, mode, filter, step. While transmitting with split the frequency, mode and
+	// band show the TX side, as the rig and x6100_trx do (2026-11-20); the step per mode
+	// and the band's last frequency stay with the receiver
+	uint64_t tx_hz = 0;
+	const bool show_tx = (tx || G.info.ptt) && G.st.split.valid && G.st.split.value && other_freq(&tx_hz);
+	const struct radio_mode *dm = show_tx && other_mode() != NULL ? other_mode() : m;
+
+	if (show_tx || rx->freq_valid[0]) {
+		fmt_freq(buf, sizeof(buf), show_tx ? tx_hz : rx->freq_hz[0]);
 		set_text_if(G.l_freq, buf);
 	}
 	lv_obj_set_style_text_color(G.l_freq, lv_color_hex(lock ? C_DIM : C_FREQ), 0);
-	if (m->valid) {
-		snprintf(buf, sizeof(buf), "%s%s", m->name, m->data ? "-D" : "");
+	if (dm->valid) {
+		snprintf(buf, sizeof(buf), "%s%s", dm->name, dm->data ? "-D" : "");
 		set_text_if(G.l_mode, buf);
+	}
+	if (m->valid) {
 		snprintf(buf, sizeof(buf), "%s", m->filter_name[0] != '\0' ? m->filter_name : "FIL");
 		set_text_if(G.l_filter, buf);
 	}
@@ -1456,13 +1464,14 @@ static void update_lines(void)
 	// The band: its name (BAND outside the rig file's bands), its last frequency kept
 	{
 		const int b = rx->freq_valid[0] ? band_of(rx->freq_hz[0]) : -1;
+		const int bs = show_tx ? band_of(tx_hz) : b;	/* shown: the TX band while keyed with split */
 
-		if (b >= 0) {
+		if (b >= 0)
 			G.band_hz[b] = rx->freq_hz[0];
-			set_text_if(G.l_band, r->bands[b].name);
-		} else {
+		if (bs >= 0)
+			set_text_if(G.l_band, r->bands[bs].name);
+		else
 			set_text_if(G.l_band, "BAND");
-		}
 	}
 
 	// AGC, attenuator, preamp, split: hidden when the rig has none
@@ -1663,6 +1672,10 @@ static void update_lines(void)
 			snprintf(buf, sizeof(buf), "%s", "TX CLIP");
 		else
 			snprintf(buf, sizeof(buf), "TX %d dB", (int)lround(G.tx_hold_db));
+	} else if (G.info.tx_refused) {
+		// The server gave TX to another client (wfserver: the first to connect; wfview
+		// still connected, 2026-11-20): say so, not just a grey PTT
+		snprintf(buf, sizeof(buf), "%s", "TX IN USE");
 	} else {
 		snprintf(buf, sizeof(buf), "%s", "PTT");
 	}

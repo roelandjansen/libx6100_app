@@ -248,6 +248,7 @@ static void update_info(struct session *s)
 		i->rx_codec = s->ctl.cfg.rx_codec;
 	}
 	i->tx_available = s->streams_open && s->tx_ready && s->rig_active && rig_has_ptt(&s->rig);
+	i->tx_refused = s->streams_open && s->tx != NULL && s->ctl.tx_sample_rates < 2 && rig_has_ptt(&s->rig);
 	i->ptt = s->ptt;
 	i->ptt_remaining_s = 0;
 	if (s->ptt && s->t_ptt_timeout != 0) {

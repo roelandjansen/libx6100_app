@@ -144,6 +144,7 @@ struct session_info {
 	// TX (phase 5)
 	//
 	bool tx_available;
+	bool tx_refused;	/* the server offers no TX audio: another client holds it (wfserver gives TX to the first; 2026-11-20) */
 	bool ptt;
 	int ptt_remaining_s;
 	uint8_t tx_codec;

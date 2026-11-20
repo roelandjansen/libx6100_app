@@ -48,6 +48,10 @@ static struct {
 	//
 	uint32_t t_lost;
 	bool reconnecting;
+	bool had_tx;		/* this connection had TX: a reconnect that gets none (the old session still
+				   held it at wfserver, 2026-11-20) connects again, C_TX_RETRY_N times */
+	uint32_t t_txretry;
+	int n_txretry;
 
 	//
 	// Main thread -> render thread handover (lock)
@@ -421,6 +425,44 @@ static void reconnect_session(void)
 		ui_set_ctx(G.s);
 }
 
+//
+// TX back after a reconnect (2026-11-20): wfserver gives TX audio to the first client
+// only. A reconnect connects the new session before it closes the old one, so a server
+// that still holds the old one refuses TX to the new one (TX IN USE). When this
+// connection had TX, connect once more C_TX_RETRY_MS later, by then the old session is
+// gone; at most C_TX_RETRY_N times (another client, wfview, may hold it for good)
+//
+
+#define C_TX_RETRY_MS	3000u
+#define C_TX_RETRY_N	3
+
+static void watch_tx(const struct session_info *in, uint32_t t)
+{
+	if (G.s == NULL || in->state != SESSION_CONNECTED)
+		return;
+
+	if (in->tx_available) {
+		G.had_tx = true;
+		G.n_txretry = 0;
+		G.t_txretry = 0;
+		return;
+	}
+	if (!G.had_tx || !in->tx_refused || G.n_txretry >= C_TX_RETRY_N)
+		return;
+
+	if (G.t_txretry == 0) {
+		G.t_txretry = t != 0 ? t : 1;
+		return;
+	}
+	if (t - G.t_txretry >= C_TX_RETRY_MS) {
+		G.n_txretry++;
+		G.t_txretry = 0;
+		__android_log_print(ANDROID_LOG_WARN, C_TAG, "TX refused after a reconnect: connecting again (%d/%d)",
+				G.n_txretry, C_TX_RETRY_N);
+		reconnect_session();
+	}
+}
+
 static void watch_link(void)
 {
 	const uint32_t t = tick_ms();
@@ -437,6 +479,7 @@ static void watch_link(void)
 	if (!lost) {
 		G.t_lost = 0;
 		G.reconnecting = false;
+		watch_tx(&in, t);
 		return;
 	}
 	if (G.t_lost == 0) {
