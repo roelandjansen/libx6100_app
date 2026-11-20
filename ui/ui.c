@@ -646,6 +646,16 @@ static void on_dw(lv_event_t *e)
 	G.ops.set_value(G.ops.ctx, "VFO Dual Watch", on ? 0 : 1);
 }
 
+// SPLIT in the AGC row (2026-11-20): always there on a rig with Split/Duplex, dim while
+// off, amber while on (it shifted the row when it came and went); a tap switches it
+static void on_split(lv_event_t *e)
+{
+	const bool on = G.st.split.valid && G.st.split.value != 0;
+
+	(void)e;
+	G.ops.set_value(G.ops.ctx, "Split/Duplex", on ? 0 : 1);
+}
+
 static void on_pre(lv_event_t *e)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
@@ -1176,7 +1186,8 @@ static void build_freq(lv_obj_t *scr)
 	lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
 	G.l_sql = tap_label(r, G.f_med, C_DIM, "", on_sql);
 	lv_obj_add_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
-	G.l_split = label(r, G.f_med, C_AMBER, "");
+	G.l_split = tap_label(r, G.f_med, C_DIM, "", on_split);
+	lv_obj_add_flag(G.l_split, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_scope(lv_obj_t *scr, int32_t spec_h, int32_t wf_h)
@@ -1485,7 +1496,15 @@ static void update_lines(void)
 		lv_obj_add_flag(G.l_pre, LV_OBJ_FLAG_HIDDEN);
 	}
 
-	set_text_if(G.l_split, G.st.split.valid && G.st.split.value ? "SPLIT" : "");
+	if (r != NULL && rigfile_cmd(r, "Split/Duplex") != NULL) {
+		const bool sp = G.st.split.valid && G.st.split.value != 0;
+
+		set_text_if(G.l_split, "SPLIT");
+		lv_obj_set_style_text_color(G.l_split, lv_color_hex(sp ? C_AMBER : C_DIM), 0);
+		lv_obj_remove_flag(G.l_split, LV_OBJ_FLAG_HIDDEN);
+	} else {
+		lv_obj_add_flag(G.l_split, LV_OBJ_FLAG_HIDDEN);
+	}
 
 	// Split: SPLIT TX and the frequency and mode of the other VFO / receiver on the scope,
 	// under the sub line while that shows
