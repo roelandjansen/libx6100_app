@@ -147,6 +147,7 @@ static struct {
 	bool muted;		/* the VOL tap: RX silent, silence in place of the mic */
 	bool vfo_b[2];		/* VFO B selected, per receiver (main, sub: the IC-9700 has A / B on each); from the app, the rig gives no read-back */
 	lv_obj_t *l_utc;	/* UTC date and time in the status bar */
+	int32_t link_w;		/* the latency label's width: "9999 ms", so the UTC beside it stays put */
 	uint32_t aud_pk;	/* audio packets as last seen, and when they last moved */
 	uint32_t aud_t;
 	uint32_t aud_dl;	/* ... and those dropped as late, when they last moved: LATE */
@@ -1118,6 +1119,16 @@ static void build_status(lv_obj_t *scr)
 	G.l_model = tap_label(r, G.f_small, C_DIM, "", on_model);	/* tap: the rig on / off */
 	lv_obj_align(G.l_model, LV_ALIGN_CENTER, 0, 0);
 	G.l_link = label(r, G.f_small, C_DIM, "");
+	// A fixed width, right-aligned: the UTC left of it moved when the latency went from two
+	// to three digits (2026-11-20); a longer warning widens it while it shows
+	{
+		lv_point_t sz;
+
+		lv_text_get_size(&sz, "9999 ms", G.f_small, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+		G.link_w = sz.x + 2;
+	}
+	lv_obj_set_style_text_align(G.l_link, LV_TEXT_ALIGN_RIGHT, 0);
+	lv_obj_set_width(G.l_link, G.link_w);
 	lv_obj_align(G.l_link, LV_ALIGN_RIGHT_MID, -U(8), 0);
 	// UTC between the rig name and the latency (2026-11-18)
 	G.l_utc = label(r, G.f_small, C_DIM, "");
@@ -1435,6 +1446,13 @@ static void update_lines(void)
 		lv_obj_set_style_text_color(G.l_link, lv_color_hex(warn ? C_AMBER : C_DIM), 0);
 	}
 	set_text_if(G.l_link, buf);
+	{
+		lv_point_t sz;
+
+		lv_text_get_size(&sz, buf, G.f_small, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+		lv_obj_set_width(G.l_link, sz.x + 2 > G.link_w ? sz.x + 2 : G.link_w);
+		lv_obj_update_layout(G.l_link);
+	}
 	lv_obj_align_to(G.l_utc, G.l_link, LV_ALIGN_OUT_LEFT_MID, -U(10), 0);	/* UTC left of it */
 
 	// Frequency, mode, filter, step. While transmitting with split the frequency, mode and
