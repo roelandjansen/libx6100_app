@@ -14,6 +14,7 @@
 #include <string.h>
 #include <time.h>
 
+#include "core/audio_rx.h"
 #include "core/rigfile.h"
 #include "ui/ui_chooser.h"
 #include "ui/ui_meter.h"
@@ -45,7 +46,7 @@ static const uint32_t C_STEPS[] = { 1, 10, 50, 100, 500, 1000, 2500, 5000, 9000,
 #define C_MODE_STEPS	32	/* modes (rig file numbers) with a step of their own */
 
 // The rig-name menu lines
-enum { MENU_POWER_ON, MENU_POWER_OFF, MENU_TONE, MENU_AUDIO, MENU_N };
+enum { MENU_POWER_ON, MENU_POWER_OFF, MENU_AUDIO, MENU_N };
 
 #define C_SUB		0x80deea	/* the other receiver (dual watch) */
 
@@ -120,7 +121,6 @@ static struct {
 	//
 	double tx_hold_db;
 	uint32_t tx_hold_t;
-	bool tone_on;		/* TX test tone in place of the mic */
 
 	//
 	// Dual watch (2026-11-15, step 1): DW in the AGC row, the other receiver on a line
@@ -130,7 +130,8 @@ static struct {
 	lv_obj_t *l_sub;	/* the other receiver; a tap makes it the active one (step 2) */
 	lv_obj_t *l_active;	/* MAIN / SUB on the big frequency: the active receiver */
 	uint32_t rxsel_next;	/* next ask of VFO Main/Sub Band */
-	int route;		/* AUDIO_ROUTE_* */
+	int route;		/* the choice in C_ROUTES: 0 the selected receiver (follows it), else AUDIO_ROUTE_* + 1 */
+	int route_sent;		/* AUDIO_ROUTE_* as last sent to the session, the new session starts at AUTO */
 	int menu[MENU_N];	/* the rig-name menu as shown: MENU_* per line */
 
 	//
@@ -666,18 +667,12 @@ static void on_power_off_sure(int idx, void *ud)
 		G.ops.power(G.ops.ctx, 0);
 }
 
-// The audio route of a two-channel stream (main left, sub right): auto as received (a
-// single receiver on both sides), or one receiver on both
-static const char *const C_ROUTES[] = { "Auto: main left, sub right", "Main on both sides", "Sub on both sides" };
-
-static void on_route_chosen(int idx, void *ud)
-{
-	(void)ud;
-	if (idx < 0 || idx > 2 || G.ops.audio_route == NULL)
-		return;
-	G.route = idx;	/* AUDIO_ROUTE_AUTO, _MAIN, _SUB in this order */
-	G.ops.audio_route(G.ops.ctx, idx);
-}
+// The audio route of a two-channel stream (main left, sub right; 2026-11-20): by default
+// the selected receiver on both sides, following MAIN / SUB; or as received, or one
+// receiver on both. The choice: 0 follows, else AUDIO_ROUTE_* + 1
+static const char *const C_ROUTES[] = { "Selected receiver (follows MAIN / SUB)", "Main left, sub right",
+	"Main on both sides", "Sub on both sides" };
+static const char *const C_ROUTE_SHORT[] = { "selected receiver", "main left, sub right", "main", "sub" };
 
 // A rig with two receivers and dual watch in its rig file
 static bool rig_has_dw(void)
@@ -687,18 +682,40 @@ static bool rig_has_dw(void)
 	return r != NULL && r->receivers >= 2 && rigfile_cmd(r, "VFO Dual Watch") != NULL;
 }
 
+// The route for the choice now, sent when it changed (each poll: the selected receiver
+// moves with MAIN / SUB). Rigs without dual watch stay as received
+static void route_follow(void)
+{
+	int want;
+
+	if (G.ops.audio_route == NULL || !rig_has_dw())
+		return;
+	if (G.route == 0)
+		want = G.st.rx_selected.valid && G.st.rx_selected.value != 0 ? AUDIO_ROUTE_SUB : AUDIO_ROUTE_MAIN;
+	else
+		want = G.route - 1;
+	if (want != G.route_sent) {
+		G.ops.audio_route(G.ops.ctx, want);
+		G.route_sent = want;
+	}
+}
+
+static void on_route_chosen(int idx, void *ud)
+{
+	(void)ud;
+	if (idx < 0 || idx > 3)
+		return;
+	G.route = idx;
+	route_follow();
+}
+
 static void on_power_chosen(int idx, void *ud)
 {
 	static const char *const C_SURE[] = { "No", "Yes, power off" };
 
 	(void)ud;
-	if (idx >= 0 && idx < MENU_N && G.menu[idx] == MENU_TONE) {
-		G.tone_on = !G.tone_on;
-		G.ops.test_tone(G.ops.ctx, G.tone_on ? 1 : 0);
-		return;
-	}
 	if (idx >= 0 && idx < MENU_N && G.menu[idx] == MENU_AUDIO) {
-		ui_chooser_open("Audio (two receivers)", C_ROUTES, 3, G.route, on_route_chosen, NULL);
+		ui_chooser_open("Audio (two receivers)", C_ROUTES, 4, G.route, on_route_chosen, NULL);
 		return;
 	}
 	if (G.ops.power == NULL)
@@ -719,9 +736,10 @@ static void on_overlay_power_on(lv_event_t *e)
 
 static void on_model(lv_event_t *e)
 {
-	// Power on / off, the test tone (1 kHz at -6 dBFS in place of the mic while keyed, to
-	// tell the mic chain from the rig's LAN input) and, for two receivers, the audio route
+	// Power on / off and, for two receivers, the audio route (the test tone went,
+	// 2026-11-20: it had done its job, the mic chain is known good)
 	static const char *names[MENU_N];
+	static char audio[64];
 	size_t n = 0;
 
 	(void)e;
@@ -729,13 +747,10 @@ static void on_model(lv_event_t *e)
 	names[n++] = "Power on";
 	G.menu[n] = MENU_POWER_OFF;
 	names[n++] = "Power off";
-	if (G.ops.test_tone != NULL) {
-		G.menu[n] = MENU_TONE;
-		names[n++] = G.tone_on ? "Test tone off" : "Test tone on";
-	}
 	if (G.ops.audio_route != NULL && rig_has_dw()) {
+		snprintf(audio, sizeof(audio), "Audio: %s", C_ROUTE_SHORT[G.route]);
 		G.menu[n] = MENU_AUDIO;
-		names[n++] = "Audio: main / sub";
+		names[n++] = audio;
 	}
 	ui_chooser_open("Rig", names, n, -1, on_power_chosen, NULL);
 }
@@ -1556,9 +1571,7 @@ static void update_lines(void)
 			G.tx_hold_db = db;
 			G.tx_hold_t = t;
 		}
-		if (G.tone_on)
-			snprintf(buf, sizeof(buf), "TONE %d dB", (int)lround(G.tx_hold_db));
-		else if (G.tx_hold_db > -0.1)
+		if (G.tx_hold_db > -0.1)
 			snprintf(buf, sizeof(buf), "%s", "TX CLIP");
 		else
 			snprintf(buf, sizeof(buf), "TX %d dB", (int)lround(G.tx_hold_db));
@@ -1586,7 +1599,7 @@ static void update_overlay(void)
 
 	// The CI-V address the rig gave at login: the ID query goes there (2026-11-17)
 	if (G.info.state == SESSION_CONNECTED)
-		snprintf(buf, sizeof(buf), "%s  CI-V %02X\n%s", G.info.radio_name, G.info.civ_addr,
+		snprintf(buf, sizeof(buf), "%s  CI-V 0x%02X\n%s", G.info.radio_name, G.info.civ_addr,
 				G.power_on_sent ? "switching on ..." : "reading radio state\n(rig off? Power on)");
 	else if (G.info.status[0] != '\0')
 		snprintf(buf, sizeof(buf), "%s\n%s", session_state_name(G.info.state), G.info.status);
@@ -1659,14 +1672,13 @@ static void update_markers(void)
 //
 // A new session for the same screen (the app's reconnect after a lost link, 2026-11-18):
 // the ops stay, their context changes. What the old session held for the screen is set
-// again (mute) or starts over (audio route, test tone, the audio watch)
+// again (mute) or starts over (the audio route is sent again, the audio watch)
 //
 
 void ui_set_ctx(void *ctx)
 {
 	G.ops.ctx = ctx;
-	G.route = 0;		/* AUDIO_ROUTE_AUTO: the new session starts there */
-	G.tone_on = false;
+	G.route_sent = AUDIO_ROUTE_AUTO;	/* the new session starts there; the choice stays and is sent again */
 	G.power_on_sent = false;
 	G.aud_t = 0;
 	if (G.muted)
@@ -1679,6 +1691,7 @@ void ui_poll(void)
 {
 	G.ops.get_info(G.ops.ctx, &G.info);
 	G.ops.get_state(G.ops.ctx, &G.st);
+	route_follow();
 
 	// Keep a held PTT alive; drop it when the session no longer keys
 	if (G.ptt_held) {

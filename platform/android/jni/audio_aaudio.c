@@ -12,6 +12,8 @@
 
 #include <stdatomic.h>
 #include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
 
@@ -25,6 +27,8 @@
 static AAudioStream *G_OUT;
 static AAudioStream *G_IN;
 static bool G_WANT_IN;
+static bool G_WANT_OUT;		/* playback opened: kept open (the watchdog reopens it) */
+static atomic_uint G_OUT_CALLS;	/* output callbacks so far: the watchdog sees them move */
 static bool G_VOICE;		/* a Bluetooth headset in call mode: voice streams (2026-11-15) */
 static atomic_bool G_OUT_ERR;
 static atomic_bool G_IN_ERR;
@@ -47,6 +51,7 @@ static aaudio_data_callback_result_t out_cb(AAudioStream *st, void *ud, void *da
 		session_audio_read(s, data, (size_t)frames);
 	else
 		memset(data, 0, (size_t)frames * 2 * sizeof(float));	/* no session: silence */
+	atomic_fetch_add_explicit(&G_OUT_CALLS, 1u, memory_order_relaxed);
 	atomic_fetch_sub(&G_BUSY, 1);
 	return AAUDIO_CALLBACK_RESULT_CONTINUE;
 }
@@ -135,6 +140,7 @@ int audio_aa_open_playback(void)
 	atomic_store(&G_SESSION, NULL);
 	atomic_store(&G_OUT_ERR, false);
 	G_OUT = open_stream(false);
+	G_WANT_OUT = true;
 	return G_OUT != NULL ? 0 : -1;
 }
 
@@ -181,17 +187,77 @@ void audio_aa_close(void)
 	close_stream(&G_OUT);
 	close_stream(&G_IN);
 	G_WANT_IN = false;
+	G_WANT_OUT = false;
 	atomic_store(&G_SESSION, NULL);
+}
+
+static uint32_t mono_ms(void)
+{
+	struct timespec ts;
+
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+	return (uint32_t)((uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u);
+}
+
+static void reopen_out(const char *why)
+{
+	__android_log_print(ANDROID_LOG_WARN, C_TAG, "playback: %s, reopened", why);
+	close_stream(&G_OUT);
+	G_OUT = open_stream(false);
+	if (G_OUT != NULL && atomic_load(&G_SESSION) != NULL)
+		AAudioStream_requestStart(G_OUT);
+}
+
+//
+// Playback watchdog (2026-11-20: now and then NO OUTPUT, packets came but the phone
+// played none, until a reconnect, whose attach starts the stream again): a stream that
+// failed to reopen is tried again each second; one whose callback has not run for
+// C_OUT_STALL_MS while a session is attached (stopped or paused by the system without
+// an error callback) is reopened
+//
+
+#define C_OUT_STALL_MS	1000u
+
+static void watch_out(void)
+{
+	static uint32_t calls;
+	static uint32_t t_moved;
+	static uint32_t t_retry;
+	const uint32_t t = mono_ms();
+	const uint32_t c = atomic_load_explicit(&G_OUT_CALLS, memory_order_relaxed);
+
+	if (!G_WANT_OUT)
+		return;
+
+	if (G_OUT == NULL) {
+		if ((uint32_t)(t - t_retry) >= 1000u) {
+			t_retry = t;
+			reopen_out("no stream");
+			t_moved = t;
+		}
+		return;
+	}
+
+	if (c != calls || atomic_load(&G_SESSION) == NULL || t_moved == 0) {
+		calls = c;
+		t_moved = t;
+		return;
+	}
+	if ((uint32_t)(t - t_moved) >= C_OUT_STALL_MS) {
+		char why[64];
+
+		snprintf(why, sizeof(why), "no callback for %u ms (state %d)", (unsigned)(t - t_moved),
+				(int)AAudioStream_getState(G_OUT));
+		reopen_out(why);
+		t_moved = t;
+	}
 }
 
 void audio_aa_service(void)
 {
-	if (atomic_exchange(&G_OUT_ERR, false)) {
-		close_stream(&G_OUT);
-		G_OUT = open_stream(false);
-		if (G_OUT != NULL && atomic_load(&G_SESSION) != NULL)
-			AAudioStream_requestStart(G_OUT);
-	}
+	if (atomic_exchange(&G_OUT_ERR, false))
+		reopen_out("error callback");
+	watch_out();
 
 	if (atomic_exchange(&G_IN_ERR, false)) {
 		close_stream(&G_IN);

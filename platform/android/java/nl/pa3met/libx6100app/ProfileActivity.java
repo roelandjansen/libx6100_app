@@ -16,6 +16,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.InputType;
+import android.util.TypedValue;
 import android.graphics.Color;
 import android.view.View;
 import android.view.ViewGroup;
@@ -33,6 +34,8 @@ import java.util.ArrayList;
 
 public class ProfileActivity extends Activity {
 
+	private EditText probe;		/* a plain EditText: its text start and size, for the spinners */
+
 	//
 	// Spinner lists with explicit colours: the current choice on an accent
 	// background, the rest white on dark (the theme greys out the checked
@@ -47,11 +50,19 @@ public class ProfileActivity extends Activity {
 			setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
 		}
 
+		// The choice as shown: its text where an EditText has its text, in the same size
+		// (2026-11-20: the spinner's own padding and the item's put it further right
+		// than the name field below it)
 		@Override
 		public View getView(int pos, View convert, ViewGroup parent) {
 			TextView t = (TextView)super.getView(pos, convert, parent);
 
+			if (probe == null)
+				probe = new EditText(ProfileActivity.this);
 			t.setTextColor(Color.WHITE);
+			t.setTextSize(TypedValue.COMPLEX_UNIT_PX, probe.getTextSize());
+			t.setPadding(Math.max(0, probe.getPaddingLeft() - owner.getPaddingLeft()), t.getPaddingTop(),
+					t.getPaddingRight(), t.getPaddingBottom());
 			return t;
 		}
 
