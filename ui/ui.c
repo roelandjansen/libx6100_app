@@ -129,7 +129,7 @@ static struct {
 	lv_obj_t *l_dw;
 	lv_obj_t *l_sub;	/* the other receiver; a tap makes it the active one (step 2) */
 	lv_obj_t *l_active;	/* MAIN / SUB on the big frequency: the active receiver */
-	lv_obj_t *l_txf;	/* TX n.nnn.nnn on the big frequency, top right, with split (2026-11-20) */
+	lv_obj_t *l_txf;	/* SPLIT TX n.nnn.nnn mode on the scope, top left, with split (2026-11-20) */
 	uint32_t rxsel_next;	/* next ask of VFO Main/Sub Band */
 	int route;		/* the choice in C_ROUTES: 0 the selected receiver (follows it), else AUDIO_ROUTE_* + 1 */
 	int route_sent;		/* AUDIO_ROUTE_* as last sent to the session, the new session starts at AUTO */
@@ -177,6 +177,7 @@ static int32_t U(float v)
 }
 
 static bool other_freq(uint64_t *hz);	/* the other receiver / VFO (below) */
+static const struct radio_mode *other_mode(void);
 
 //
 // Formatting
@@ -1155,10 +1156,6 @@ static void build_freq(lv_obj_t *scr)
 	G.l_active = label(r, G.f_small, C_DIM, "");
 	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(8), U(2));
 	lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
-	// With split: where TX goes, top right of the frequency box (amber)
-	G.l_txf = label(r, G.f_small, C_AMBER, "");
-	lv_obj_align(G.l_txf, LV_ALIGN_TOP_RIGHT, -U(8), U(2));
-	lv_obj_add_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
 
 	r = row(scr, U(32));
 	G.l_mode = tap_label(r, G.f_large, C_ACCENT, "---", on_mode);
@@ -1210,6 +1207,15 @@ static void build_scope(lv_obj_t *scr, int32_t spec_h, int32_t wf_h)
 	lv_obj_set_style_pad_hor(G.l_sub, U(4), 0);
 	lv_obj_align(G.l_sub, LV_ALIGN_TOP_LEFT, U(4), U(2));
 	lv_obj_add_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN);
+
+	// Split: where TX goes, as x6100_trx's note (SPLIT TX 70.225.000 USB), amber on the
+	// same strip; under the sub line while that shows (2026-11-20)
+	G.l_txf = label(G.scope.spec, G.f_med, C_AMBER, "");
+	lv_obj_set_style_bg_color(G.l_txf, lv_color_hex(C_BG), 0);
+	lv_obj_set_style_bg_opa(G.l_txf, LV_OPA_70, 0);
+	lv_obj_set_style_pad_hor(G.l_txf, U(4), 0);
+	lv_obj_align(G.l_txf, LV_ALIGN_TOP_LEFT, U(4), U(2));
+	lv_obj_add_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
 }
 
 static void build_bottom(lv_obj_t *scr)
@@ -1481,16 +1487,23 @@ static void update_lines(void)
 
 	set_text_if(G.l_split, G.st.split.valid && G.st.split.value ? "SPLIT" : "");
 
-	// Split: the TX frequency on the frequency box (the other VFO / receiver)
+	// Split: SPLIT TX and the frequency and mode of the other VFO / receiver on the scope,
+	// under the sub line while that shows
 	{
 		uint64_t txhz = 0;
 
 		if (G.st.split.valid && G.st.split.value && other_freq(&txhz)) {
+			const struct radio_mode *om = other_mode();
+			const int32_t lh = lv_font_get_line_height(G.f_med);
 			char f[32];
+			char line[128];
 
 			fmt_freq(f, sizeof(f), txhz);
-			snprintf(buf, sizeof(buf), "TX %s", f);
-			set_text_if(G.l_txf, buf);
+			snprintf(line, sizeof(line), "SPLIT TX %s  %s%s", f, om != NULL ? om->name : "",
+					om != NULL && om->data ? "-D" : "");
+			set_text_if(G.l_txf, line);
+			lv_obj_align(G.l_txf, LV_ALIGN_TOP_LEFT, U(4),
+					U(2) + (lv_obj_has_flag(G.l_sub, LV_OBJ_FLAG_HIDDEN) ? 0 : lh + U(2)));
 			lv_obj_remove_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
 		} else {
 			lv_obj_add_flag(G.l_txf, LV_OBJ_FLAG_HIDDEN);
@@ -1693,6 +1706,14 @@ static bool other_freq(uint64_t *hz)
 		return false;
 	*hz = G.st.rx[0].freq_hz[1];
 	return true;
+}
+
+// ... and its mode, NULL while not known
+static const struct radio_mode *other_mode(void)
+{
+	const struct radio_mode *m = rig_has_ms() ? &G.st.rx[1].mode[0] : &G.st.rx[0].mode[1];
+
+	return m->valid ? m : NULL;
 }
 
 static void update_markers(void)
