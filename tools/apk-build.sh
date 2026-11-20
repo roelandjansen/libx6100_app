@@ -112,7 +112,8 @@ package() {
 	(cd -- "${G_TMP}" && zip -q base.apk classes.dex)
 	(cd -- "${G_OUT}" && zip -q -0 "${G_TMP}/base.apk" lib/arm64-v8a/libradio.so)
 	"${C_BT}/zipalign" -P 16 -f 4 "${G_TMP}/base.apk" "${G_TMP}/aligned.apk"
-	"${C_BT}/apksigner" sign --ks "${C_KEY}" --ks-pass "pass:${C_KEY_PASS}" \
+	# No v4 signature: its .idsig file next to the APK is only for adb install --incremental
+	"${C_BT}/apksigner" sign --ks "${C_KEY}" --ks-pass "pass:${C_KEY_PASS}" --v4-signing-enabled false \
 		--out "${L_APK}" "${G_TMP}/aligned.apk"
 	"${C_BT}/apksigner" verify "${L_APK}"
 	printf 'built %s\n' "${L_APK}"
