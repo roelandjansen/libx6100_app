@@ -542,29 +542,29 @@ static void on_band_step(lv_event_t *e)
 	const int dir = lv_event_get_target(e) == G.l_band_up ? 1 : -1;
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
 	const uint64_t f = G.st.rx[0].freq_hz[0];
-	int sel = band_list();
+	int cur = -1;	/* the band we are on: the highest one that starts at or below f */
+	int sel;
 	int n;
+	int i;
 
+	(void)band_list();	/* fills G_BAND_IDX / G_BAND_N, sorted by start */
 	if (r == NULL || G_BAND_N == 0)
 		return;
 	n = (int)G_BAND_N;
-	if (sel >= 0) {
-		sel = (sel + dir + n) % n;
-	} else {
-		// Outside the bands: the first band above (or below) the frequency, else round
-		int i;
 
-		sel = dir > 0 ? 0 : n - 1;
-		for (i = 0; i < n; i++) {
-			const int k = dir > 0 ? i : n - 1 - i;
-			const uint64_t s = r->bands[G_BAND_IDX[k]].start;
+	// 2026-11-21: in GEN (outside the ham bands) band up / down jumped to the lowest /
+	// highest band. The band membership (band_of) matched a wide GEN entry and the step
+	// fell through to the wrong end. Now stepping ignores membership: the band we are on
+	// is the highest whose start is at or below f (none: below every band)
+	for (i = 0; i < n; i++)
+		if (r->bands[G_BAND_IDX[i]].start <= f)
+			cur = i;
 
-			if (dir > 0 ? s > f : s < f) {
-				sel = k;
-				break;
-			}
-		}
-	}
+	if (cur < 0)
+		sel = dir > 0 ? 0 : n - 1;	/* below every band: up to the lowest, down wraps to the highest */
+	else
+		sel = (cur + dir + n) % n;
+
 	on_band_chosen(sel, NULL);
 }
 
