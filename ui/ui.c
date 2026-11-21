@@ -471,8 +471,9 @@ static void on_band_chosen(int idx, void *ud)
 	G.ops.set_freq(G.ops.ctx, G.band_hz[b] != 0 ? G.band_hz[b] : r->bands[b].start);
 }
 
-// The rig file's bands, each name once, in the rig file's order, into G_BAND_IDX; the line
-// of the band the receiver is on, -1 none
+// The rig file's bands, each name once, by frequency (2026-11-21: in the rig file's
+// order, which runs top down, >> went a band lower), into G_BAND_IDX; the line of the
+// band the receiver is on, -1 none
 static int band_list(void)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
@@ -492,10 +493,21 @@ static int band_list(void)
 				dup = true;
 		if (dup || r->bands[i].name[0] == '\0')
 			continue;
-		if (cur >= 0 && strcmp(r->bands[i].name, r->bands[cur].name) == 0)
-			sel = (int)G_BAND_N;
 		G_BAND_IDX[G_BAND_N++] = (int)i;
 	}
+
+	// By start frequency (insertion sort: some twenty bands)
+	for (i = 1; i < G_BAND_N; i++) {
+		const int k = G_BAND_IDX[i];
+
+		for (j = i; j > 0 && r->bands[G_BAND_IDX[j - 1]].start > r->bands[k].start; j--)
+			G_BAND_IDX[j] = G_BAND_IDX[j - 1];
+		G_BAND_IDX[j] = k;
+	}
+
+	for (i = 0; i < G_BAND_N && cur >= 0; i++)
+		if (strcmp(r->bands[G_BAND_IDX[i]].name, r->bands[cur].name) == 0)
+			sel = (int)i;
 	return sel;
 }
 
