@@ -41,7 +41,8 @@
 // Tuning steps offered (the rig's own step command is not used for this,
 // as wfview: the step is a client setting)
 //
-static const uint32_t C_STEPS[] = { 1, 10, 50, 100, 500, 1000, 2500, 5000, 9000, 10000, 12500, 25000, 100000 };
+static const uint32_t C_STEPS[] = { 1, 10, 50, 100, 500, 1000, 2500, 5000, 6250, 8333, 9000, 10000, 12500,
+	25000, 100000 };
 #define C_N_STEPS	(sizeof(C_STEPS) / sizeof(C_STEPS[0]))
 #define C_MODE_STEPS	32	/* modes (rig file numbers) with a step of their own */
 
@@ -205,12 +206,23 @@ static void fmt_freq(char *buf, size_t size, uint64_t hz)
 
 static void fmt_step(char *buf, size_t size, uint32_t hz)
 {
-	if (hz >= 1000u && hz % 1000u == 0)
+	if (hz >= 1000u && hz % 1000u == 0) {
 		snprintf(buf, size, "STEP %uk", (unsigned int)(hz / 1000u));
-	else if (hz >= 1000u)
-		snprintf(buf, size, "STEP %.1fk", (double)hz / 1000.0);
-	else
+	} else if (hz >= 1000u) {
+		char k[16];
+		size_t n;
+
+		// kHz with up to three decimals (6.25k, 8.333k), trailing zeros trimmed
+		snprintf(k, sizeof(k), "%.3f", (double)hz / 1000.0);
+		n = strlen(k);
+		while (n > 0 && k[n - 1] == '0')
+			k[--n] = '\0';
+		if (n > 0 && k[n - 1] == '.')
+			k[--n] = '\0';
+		snprintf(buf, size, "STEP %sk", k);
+	} else {
 		snprintf(buf, size, "STEP %u", (unsigned int)hz);
+	}
 }
 
 static void fmt_span(char *buf, size_t size, int mode, int half_span)
