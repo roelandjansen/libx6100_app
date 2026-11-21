@@ -1261,6 +1261,17 @@ uint64_t rig_round_frequency(uint64_t freq, int steps, uint32_t step_hz)
 	if (step_hz < 1)
 		step_hz = 1;
 
+	// Airband 8.333 kHz (2026-11-21): the grid is 25 kHz / 3, not multiples of 8333 Hz
+	// (that drifted: 900.000 stepped to 908.297, and every third channel missed the 25 kHz
+	// mark). Channel k = round(freq * 3 / 25000); step the index, back to Hz, rounded
+	if (step_hz == 8333u) {
+		int64_t k = (int64_t)((freq * 3u + 12500u) / 25000u) + steps;
+
+		if (k < 0)
+			k = 0;
+		return ((uint64_t)k * 25000u + 1u) / 3u;
+	}
+
 	delta = (uint64_t)(steps < 0 ? -(int64_t)steps : steps) * step_hz;
 	rem = freq % step_hz;
 	floored = freq - rem;
