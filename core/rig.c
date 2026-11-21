@@ -485,13 +485,14 @@ static void send_item(struct rig *r, const struct rig_item *it)
 }
 
 //
-// The receiver's frequency and mode commands: polled at High at the least (addition 7)
+// The receiver's frequency and mode commands, and RF power (2026-11-21: a change on the
+// rig showed after seconds): polled at High at the least (addition 7)
 //
 
 static bool fast_poll(const char *command)
 {
 	static const char *const C_NAMES[] = { "RX Mode", "RX Frequency", "Selected Freq", "Selected Mode",
-		"Unselected Freq", "Unselected Mode" };
+		"Unselected Freq", "Unselected Mode", "RF Power" };
 	size_t i;
 
 	for (i = 0; i < sizeof(C_NAMES) / sizeof(C_NAMES[0]); i++)

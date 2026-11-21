@@ -1637,7 +1637,7 @@ static void update_lines(void)
 
 	// Squelch: SQL and its level in %, amber while set (rigs with the command)
 	if (r != NULL && rigfile_cmd(r, "Squelch") != NULL && G.st.squelch.valid) {
-		snprintf(buf, sizeof(buf), G.st.squelch.value ? "SQL %d" : "SQL OFF", G.st.squelch.value * 100 / 255);
+		snprintf(buf, sizeof(buf), G.st.squelch.value ? "SQL %d" : "SQL OFF", (G.st.squelch.value * 100 + 127) / 255);
 		set_text_if(G.l_sql, buf);
 		lv_obj_set_style_text_color(G.l_sql, lv_color_hex(G.st.squelch.value ? C_AMBER : C_DIM), 0);
 		lv_obj_remove_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
@@ -1647,7 +1647,7 @@ static void update_lines(void)
 
 	// RF power: PWR and its level in %, amber when low (under 10 %; rigs with the command)
 	if (r != NULL && rigfile_cmd(r, "RF Power") != NULL && G.st.rf_power.valid) {
-		const int pct = G.st.rf_power.value * 100 / 255;
+		const int pct = (G.st.rf_power.value * 100 + 127) / 255;	/* rounded: 254 is 100 % (2026-11-21: 99) */
 
 		snprintf(buf, sizeof(buf), "PWR %d%%", pct);
 		set_text_if(G.l_pwr, buf);
@@ -1730,7 +1730,7 @@ static void update_lines(void)
 	if (G.muted)
 		snprintf(buf, sizeof(buf), "%s", "MUTE");
 	else
-		snprintf(buf, sizeof(buf), "VOL %d", G.volume * 100 / 255);
+		snprintf(buf, sizeof(buf), "VOL %d", (G.volume * 100 + 127) / 255);
 	lv_obj_set_style_bg_color(G.b_vol, lv_color_hex(G.muted ? 0x8d2f2f : 0x263241), 0);
 	set_text_if(G.l_vol, buf);
 	// PTT needs TX; the ATU button stays usable (in / out sends nothing on the air; its
