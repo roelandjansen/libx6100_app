@@ -156,6 +156,12 @@ static struct {
 	uint32_t aud_dl_t;
 	bool ptt_was;		/* our PTT as last seen, and when we let it go: the display back to RX at once */
 	uint32_t ptt_release_t;
+	bool tuning_was;	/* the rig tuning, last seen: after it the SWR stays C_TUNE_HOLD_MS (2026-11-21) */
+	uint32_t tune_hold_t;
+	double tune_swr;	/* the last SWR while transmitting */
+	bool tune_asked;	/* our ATU tune sent: the TX that ends next is the tune (a short one can fall between two polls of the tuner state) */
+	uint32_t tune_asked_t;
+	bool meter_tx_was;
 	uint32_t ovr_prev;	/* overrun frames a second ago: NO OUTPUT */
 	uint32_t ovr_t;
 	bool no_output;
@@ -1035,6 +1041,8 @@ static void on_tune(lv_event_t *e)
 	if (!G.info.tx_available)
 		return;
 	G.ops.atu_tune(G.ops.ctx);
+	G.tune_asked = true;
+	G.tune_asked_t = lv_tick_get();
 	atu_watch(true);
 }
 
@@ -1443,18 +1451,38 @@ static double power_full_scale(void)
 	return 200.0;
 }
 
+// After a tune the result stays on the meter C_TUNE_HOLD_MS (2026-11-21: the SWR showed
+// only a moment): the needle at 0 W, the last SWR below it
+#define C_TUNE_HOLD_MS	4000u
+
 static void update_meter(void)
 {
 	const bool tx = G.st.transmit.valid && G.st.transmit.value != 0;
+	const bool tuning = G.st.tuner.valid && G.st.tuner.value == 2;
+	const uint32_t t = lv_tick_get();
+	const struct radio_meter_value *swr = &G.st.meter[RADIO_METER_SWR];
 
 	if (G.vu == NULL)
 		return;
+	if (G.tune_asked && t - G.tune_asked_t >= 20000u)
+		G.tune_asked = false;	/* the tune never came (refused): a later TX is not it */
+	if ((G.tuning_was && !tuning) || (G.meter_tx_was && !tx && G.tune_asked)) {
+		G.tune_asked = false;
+		G.tune_hold_t = t != 0 ? t : 1;
+	}
+	G.meter_tx_was = tx;
+	G.tuning_was = tuning;
+
 	if (tx) {
 		const struct radio_meter_value *po = &G.st.meter[RADIO_METER_POWER];
-		const struct radio_meter_value *swr = &G.st.meter[RADIO_METER_SWR];
 
+		if (swr->valid)
+			G.tune_swr = swr->cal;
 		ui_meter_tx(G.vu, po->valid ? po->cal : 0.0, swr->valid ? swr->cal : 1.0, power_full_scale());
+	} else if (G.tune_hold_t != 0 && t - G.tune_hold_t < C_TUNE_HOLD_MS && G.tune_swr > 0.0) {
+		ui_meter_tx(G.vu, 0.0, G.tune_swr, power_full_scale());
 	} else {
+		G.tune_hold_t = 0;
 		ui_meter_rx(G.vu, G.st.meter[RADIO_METER_S].valid, G.st.meter[RADIO_METER_S].cal);
 	}
 }
