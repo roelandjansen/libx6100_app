@@ -129,6 +129,8 @@ static struct {
 	lv_obj_t *l_dw;
 	lv_obj_t *l_sub;	/* the other receiver; a tap makes it the active one (step 2) */
 	lv_obj_t *l_active;	/* MAIN / SUB on the big frequency: the active receiver */
+	lv_obj_t *l_band_dn;	/* << and >> above < and >: a band down / up (2026-11-21) */
+	lv_obj_t *l_band_up;
 	lv_obj_t *l_txf;	/* SPLIT TX n.nnn.nnn mode on the scope, top left, with split (2026-11-20) */
 	uint32_t rxsel_next;	/* next ask of VFO Main/Sub Band */
 	int route;		/* the choice in C_ROUTES: 0 the selected receiver (follows it), else AUDIO_ROUTE_* + 1 */
@@ -469,19 +471,19 @@ static void on_band_chosen(int idx, void *ud)
 	G.ops.set_freq(G.ops.ctx, G.band_hz[b] != 0 ? G.band_hz[b] : r->bands[b].start);
 }
 
-static void on_band(lv_event_t *e)
+// The rig file's bands, each name once, in the rig file's order, into G_BAND_IDX; the line
+// of the band the receiver is on, -1 none
+static int band_list(void)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
-	const char *names[UI_CHOOSER_MAX];
 	const int cur = G.st.rx[0].freq_valid[0] ? band_of(G.st.rx[0].freq_hz[0]) : -1;
 	int sel = -1;
 	size_t i;
 	size_t j;
 
-	(void)e;
-	if (r == NULL || r->n_bands == 0)
-		return;
 	G_BAND_N = 0;
+	if (r == NULL)
+		return -1;
 	for (i = 0; i < r->n_bands && i < RIG_MAX_BANDS && G_BAND_N < UI_CHOOSER_MAX; i++) {
 		bool dup = false;
 
@@ -492,10 +494,60 @@ static void on_band(lv_event_t *e)
 			continue;
 		if (cur >= 0 && strcmp(r->bands[i].name, r->bands[cur].name) == 0)
 			sel = (int)G_BAND_N;
-		G_BAND_IDX[G_BAND_N] = (int)i;
-		names[G_BAND_N++] = r->bands[i].name;
+		G_BAND_IDX[G_BAND_N++] = (int)i;
 	}
+	return sel;
+}
+
+static void on_band(lv_event_t *e)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const char *names[UI_CHOOSER_MAX];
+	const int sel = band_list();
+	size_t i;
+
+	(void)e;
+	if (r == NULL || G_BAND_N == 0)
+		return;
+	for (i = 0; i < G_BAND_N; i++)
+		names[i] = r->bands[G_BAND_IDX[i]].name;
 	ui_chooser_open("Band", names, G_BAND_N, sel, on_band_chosen, NULL);
+}
+
+//
+// << and >> above < and > (2026-11-21): the band below / above, round, to its last
+// frequency (as the band button); outside the bands the nearest one that way
+//
+
+static void on_band_step(lv_event_t *e)
+{
+	const int dir = lv_event_get_target(e) == G.l_band_up ? 1 : -1;
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const uint64_t f = G.st.rx[0].freq_hz[0];
+	int sel = band_list();
+	int n;
+
+	if (r == NULL || G_BAND_N == 0)
+		return;
+	n = (int)G_BAND_N;
+	if (sel >= 0) {
+		sel = (sel + dir + n) % n;
+	} else {
+		// Outside the bands: the first band above (or below) the frequency, else round
+		int i;
+
+		sel = dir > 0 ? 0 : n - 1;
+		for (i = 0; i < n; i++) {
+			const int k = dir > 0 ? i : n - 1 - i;
+			const uint64_t s = r->bands[G_BAND_IDX[k]].start;
+
+			if (dir > 0 ? s > f : s < f) {
+				sel = k;
+				break;
+			}
+		}
+	}
+	on_band_chosen(sel, NULL);
 }
 
 //
@@ -1152,7 +1204,7 @@ static void build_meter(lv_obj_t *scr)
 
 static void build_freq(lv_obj_t *scr)
 {
-	lv_obj_t *r = box(scr, U(76), C_BG);
+	lv_obj_t *r = box(scr, U(100), C_BG);	/* 76 + the << >> row (2026-11-21) */
 
 	// The digits: a tap on a digit's upper / lower half adds / takes one there, a long
 	// press opens the keypad (2026-11-18; was a tap)
@@ -1160,13 +1212,13 @@ static void build_freq(lv_obj_t *scr)
 	lv_obj_add_flag(G.l_freq, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_event_cb(G.l_freq, on_freq_digit, LV_EVENT_SHORT_CLICKED, NULL);
 	lv_obj_add_event_cb(G.l_freq, on_freq, LV_EVENT_LONG_PRESSED, NULL);
-	lv_obj_center(G.l_freq);
+	lv_obj_align(G.l_freq, LV_ALIGN_CENTER, 0, U(10));
 
 	// The arrows: a tuning step down / up, repeating while held
 	G.l_left = label(r, G.f_freq, C_DIM, "<");
 	G.l_right = label(r, G.f_freq, C_DIM, ">");
-	lv_obj_align(G.l_left, LV_ALIGN_LEFT_MID, U(6), 0);
-	lv_obj_align(G.l_right, LV_ALIGN_RIGHT_MID, -U(6), 0);
+	lv_obj_align(G.l_left, LV_ALIGN_LEFT_MID, U(6), U(10));
+	lv_obj_align(G.l_right, LV_ALIGN_RIGHT_MID, -U(6), U(10));
 	lv_obj_add_flag(G.l_left, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_add_flag(G.l_right, LV_OBJ_FLAG_CLICKABLE);
 	lv_obj_set_ext_click_area(G.l_left, U(10));
@@ -1177,8 +1229,15 @@ static void build_freq(lv_obj_t *scr)
 	lv_obj_add_event_cb(G.l_right, on_freq_arrow, LV_EVENT_LONG_PRESSED_REPEAT, NULL);
 	// MAIN / SUB: the active receiver, top left of the frequency box (dual watch rigs)
 	G.l_active = label(r, G.f_small, C_DIM, "");
-	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(8), U(2));
+	lv_obj_align(G.l_active, LV_ALIGN_TOP_LEFT, U(48), U(2));
 	lv_obj_add_flag(G.l_active, LV_OBJ_FLAG_HIDDEN);
+	// << and >> above < and >: a band down / up (2026-11-21)
+	G.l_band_dn = tap_label(r, G.f_large, C_ACCENT, "<<", on_band_step);
+	G.l_band_up = tap_label(r, G.f_large, C_ACCENT, ">>", on_band_step);
+	lv_obj_align(G.l_band_dn, LV_ALIGN_TOP_LEFT, U(8), U(0));
+	lv_obj_align(G.l_band_up, LV_ALIGN_TOP_RIGHT, -U(8), U(0));
+	lv_obj_set_ext_click_area(G.l_band_dn, U(8));
+	lv_obj_set_ext_click_area(G.l_band_up, U(8));
 
 	r = row(scr, U(32));
 	G.l_mode = tap_label(r, G.f_large, C_ACCENT, "---", on_mode);
@@ -1323,7 +1382,7 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 	build_freq(scr);
 
 	// Spectrum about a third of the scope area, waterfall the rest, above the bottom bar
-	fixed = U(30) + U(C_METER_H) + U(76) + U(32) + U(28) + U(72);
+	fixed = U(30) + U(C_METER_H) + U(100) + U(32) + U(28) + U(72);	/* the frequency box 100: << >> (2026-11-21) */
 	rest = G.h - inset_top - inset_bottom - fixed;
 	if (rest < U(200))
 		rest = U(200);
