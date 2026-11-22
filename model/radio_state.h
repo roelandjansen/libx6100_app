@@ -133,6 +133,7 @@ struct radio_state {
 	struct radio_value key_speed;
 	struct radio_value monitor_gain;
 	struct radio_value agc;
+	struct radio_value agc_rx[RADIO_MAX_RX];	/* per receiver: Command29 rigs (785x, 7610, 7760) answer with the receiver byte (2026-11-22) */
 	struct radio_value preamp;
 	struct radio_value attenuator;
 	struct radio_value tuning_step;

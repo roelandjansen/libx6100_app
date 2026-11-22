@@ -122,6 +122,18 @@ void app_set_profile(const struct profile *p, bool mic_allowed, bool bt_mic)
 	audio_aa_set_voice(bt_mic);
 }
 
+// The app's own data directory (NativeActivity internalDataPath): the UI keeps its steps
+// there (2026-11-22). Before app_start, from onCreate
+void app_set_data_dir(const char *dir)
+{
+	char path[256];
+
+	if (dir == NULL || dir[0] == '\0')
+		return;
+	snprintf(path, sizeof(path), "%s/ui_state", dir);
+	ui_set_state_path(path);
+}
+
 void app_set_insets(int32_t top, int32_t bottom)
 {
 	pthread_mutex_lock(&G.lock);

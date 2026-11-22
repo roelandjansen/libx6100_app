@@ -810,6 +810,12 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 			}
 		}
 		set_value(r, ke->field, bcd1(d[0]));
+		// AGC per receiver too (2026-11-22): on a Command29 rig each receiver has its own and
+		// its answer carries the receiver byte; the single field is whichever came last
+		if (ke->field == offsetof(struct radio_state, agc) && receiver < RADIO_MAX_RX) {
+			r->st.agc_rx[receiver].valid = true;
+			r->st.agc_rx[receiver].value = bcd1(d[0]);
+		}
 		return RADIO_CHG_FLAGS;
 
 	case K_RAW1:

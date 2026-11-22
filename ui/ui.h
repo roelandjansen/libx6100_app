@@ -45,6 +45,9 @@ struct ui_ops {
 	int (*set_mode)(void *ctx, int mode_num, int data, int filter);
 	int (*set_value)(void *ctx, const char *type, int value);
 	int (*get_value)(void *ctx, const char *type);	/* ask the rig once; the answer lands in the state */
+	// The same for one receiver (Command29 rigs: the receiver byte; 2026-11-22). NULL: not offered
+	int (*set_value_rx)(void *ctx, const char *type, int rx, int value);
+	int (*get_value_rx)(void *ctx, const char *type, int rx);
 	int (*set_span)(void *ctx, uint32_t half_span_hz);
 	void (*set_step)(void *ctx, uint32_t hz);
 	uint32_t (*get_step)(void *ctx);
@@ -118,3 +121,6 @@ void ui_set_volume(uint8_t volume);
 void ui_release_ptt(void);
 void ui_ops_from_session(struct ui_ops *ops, struct session *s);
 void ui_set_ctx(void *ctx);	/* a new session for the same screen (reconnect) */
+
+// The file the steps are kept in (the app's own data directory); before ui_create
+void ui_set_state_path(const char *path);

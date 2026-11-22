@@ -104,6 +104,16 @@ static int op_get_value(void *ctx, const char *type)
 	return session_get_value(ctx, type, 0);
 }
 
+static int op_set_value_rx(void *ctx, const char *type, int rx, int value)
+{
+	return rx < 0 || rx > 255 ? -1 : session_set_value(ctx, type, (uint8_t)rx, value);
+}
+
+static int op_get_value_rx(void *ctx, const char *type, int rx)
+{
+	return rx < 0 || rx > 255 ? -1 : session_get_value(ctx, type, (uint8_t)rx);
+}
+
 // The rig on / off (session_power: with the FE run for power on, as wfview)
 static int op_power(void *ctx, int on)
 {
@@ -142,6 +152,8 @@ void ui_ops_from_session(struct ui_ops *ops, struct session *s)
 	ops->set_mode = op_set_mode;
 	ops->set_value = op_set_value;
 	ops->get_value = op_get_value;
+	ops->set_value_rx = op_set_value_rx;
+	ops->get_value_rx = op_get_value_rx;
 	ops->power = op_power;
 	ops->test_tone = op_test_tone;
 	ops->audio_route = op_audio_route;

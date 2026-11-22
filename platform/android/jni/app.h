@@ -21,6 +21,7 @@
 
 void app_set_profile(const struct profile *p, bool mic_allowed, bool bt_mic);
 void app_set_insets(int32_t top, int32_t bottom);
+void app_set_data_dir(const char *dir);	/* the UI keeps its steps there */
 
 //
 // Lifecycle (main thread). app_set_window / app_set_input return once the

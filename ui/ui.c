@@ -167,7 +167,8 @@ static struct {
 	uint32_t ovr_t;
 	bool no_output;
 	uint32_t mode_step[C_MODE_STEPS];	/* the step kept per mode (0 none) */
-	int last_mode;		/* the mode the step last followed */
+	int last_mode;		/* the mode the step last followed, -1 none (a new session: apply again) */
+	uint32_t last_step;	/* the step last chosen, for a mode without its own (0 none) */
 	uint64_t band_hz[RIG_MAX_BANDS];	/* the last frequency per band (the rig file's) */
 	lv_obj_t *l_left;	/* the arrows beside the frequency */
 	lv_obj_t *l_right;
@@ -190,6 +191,7 @@ static int32_t U(float v)
 
 static bool other_freq(uint64_t *hz);	/* the other receiver / VFO (below) */
 static const struct radio_mode *other_mode(void);
+static int agc_rx(void);	/* the receiver the AGC row is about (below) */
 
 //
 // Formatting
@@ -346,6 +348,57 @@ static void on_filter(lv_event_t *e)
 	G.ops.set_mode(G.ops.ctx, m->num, m->data, next);
 }
 
+//
+// The steps kept across sessions and app restarts (2026-11-22: every connect began at
+// 100 Hz). A small text file in the app's own data directory: "step <Hz>" (the last
+// one chosen) and "mode <num> <Hz>" per mode; written on each change
+//
+
+static char G_STATE_PATH[256];	/* outside G: set before ui_create, which clears G */
+
+void ui_set_state_path(const char *path)
+{
+	snprintf(G_STATE_PATH, sizeof(G_STATE_PATH), "%s", path != NULL ? path : "");
+}
+
+static void state_load(void)
+{
+	FILE *f;
+	char line[64];
+
+	if (G_STATE_PATH[0] == '\0' || (f = fopen(G_STATE_PATH, "r")) == NULL)
+		return;
+	while (fgets(line, sizeof(line), f) != NULL) {
+		unsigned int hz;
+		int num;
+
+		if (sscanf(line, "step %u", &hz) == 1)
+			G.last_step = hz;
+		else if (sscanf(line, "mode %d %u", &num, &hz) == 2 && num >= 0 && num < C_MODE_STEPS)
+			G.mode_step[num] = hz;
+	}
+	fclose(f);
+}
+
+static void state_save(void)
+{
+	char tmp[sizeof(G_STATE_PATH) + 8];
+	FILE *f;
+	int i;
+
+	if (G_STATE_PATH[0] == '\0')
+		return;
+	snprintf(tmp, sizeof(tmp), "%s.tmp", G_STATE_PATH);
+	if ((f = fopen(tmp, "w")) == NULL)
+		return;
+	fprintf(f, "step %u\n", (unsigned int)G.last_step);
+	for (i = 0; i < C_MODE_STEPS; i++)
+		if (G.mode_step[i] != 0)
+			fprintf(f, "mode %d %u\n", i, (unsigned int)G.mode_step[i]);
+	if (fclose(f) == 0)
+		rename(tmp, G_STATE_PATH);
+}
+
 static void on_step_chosen(int idx, void *ud)
 {
 	const struct radio_mode *m = &G.st.rx[0].mode[0];
@@ -353,22 +406,28 @@ static void on_step_chosen(int idx, void *ud)
 	(void)ud;
 	if (idx >= 0 && (size_t)idx < C_N_STEPS) {
 		G.ops.set_step(G.ops.ctx, C_STEPS[idx]);
-		// Kept for this mode (2026-11-18): back when the mode comes back
+		// Kept for this mode (2026-11-18): back when the mode comes back; and as the last
+		// one chosen, for a mode without its own; both on disk (2026-11-22)
 		if (m->valid && m->num >= 0 && m->num < C_MODE_STEPS)
 			G.mode_step[m->num] = C_STEPS[idx];
+		G.last_step = C_STEPS[idx];
+		state_save();
 	}
 }
 
-// A mode change (here or on the rig): the step kept for that mode, if any
+// A mode change (here or on the rig), or a new session (last_mode -1: it began at 100 Hz):
+// the step kept for that mode, else the last one chosen
 static void mode_step_follow(void)
 {
 	const struct radio_mode *m = &G.st.rx[0].mode[0];
+	uint32_t step;
 
 	if (!m->valid || m->num == G.last_mode)
 		return;
 	G.last_mode = m->num;
-	if (m->num >= 0 && m->num < C_MODE_STEPS && G.mode_step[m->num] != 0)
-		G.ops.set_step(G.ops.ctx, G.mode_step[m->num]);
+	step = m->num >= 0 && m->num < C_MODE_STEPS && G.mode_step[m->num] != 0 ? G.mode_step[m->num] : G.last_step;
+	if (step != 0)
+		G.ops.set_step(G.ops.ctx, step);
 }
 
 //
@@ -723,6 +782,10 @@ static void rxsel_poll(void)
 		G.ops.get_value(G.ops.ctx, "VFO Main/Sub Band");
 	if (rigfile_cmd(r, "VFO Dual Watch") != NULL)
 		G.ops.get_value(G.ops.ctx, "VFO Dual Watch");
+	// The selected receiver's AGC (2026-11-22): the rig files poll AGC for the main only, or
+	// both into one value; a switch of receiver or a change on the rig shows within a second
+	if (agc_rx() >= 0 && G.ops.get_value_rx != NULL)
+		G.ops.get_value_rx(G.ops.ctx, "AGC Status", agc_rx());
 	G.rxsel_next = t + 1000u;
 }
 
@@ -877,20 +940,56 @@ static void on_model(lv_event_t *e)
 	ui_chooser_open("Rig", names, n, -1, on_power_chosen, NULL);
 }
 
+//
+// AGC per receiver (2026-11-22): on a rig whose AGC Status is a Command29 command (785x,
+// 7610, 7760: each receiver its own) the AGC row shows, sets and asks the selected
+// receiver's; elsewhere the rig's one AGC as before
+//
+
+// The receiver the AGC row is about, -1 the rig's one AGC
+static int agc_rx(void)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const struct rig_cmd *c = r != NULL ? rigfile_cmd(r, "AGC Status") : NULL;
+
+	if (c == NULL || !c->cmd29 || r->receivers < 2 || G.ops.set_value_rx == NULL)
+		return -1;
+	return G.st.rx_selected.valid && G.st.rx_selected.value != 0 ? 1 : 0;
+}
+
+// The AGC shown: the selected receiver's where known, else the rig's last answer
+static const struct radio_value *agc_shown(void)
+{
+	const int rx = agc_rx();
+
+	return rx >= 0 && rx < RADIO_MAX_RX && G.st.agc_rx[rx].valid ? &G.st.agc_rx[rx] : &G.st.agc;
+}
+
 static void on_agc_chosen(int idx, void *ud)
 {
+	const int rx = agc_rx();
+
 	(void)ud;
-	if (idx >= 0 && idx <= 2)
+	if (idx < 0 || idx > 2)
+		return;
+	if (rx >= 0) {
+		G.ops.set_value_rx(G.ops.ctx, "AGC Status", rx, idx + 1);
+		if (G.ops.get_value_rx != NULL)
+			G.ops.get_value_rx(G.ops.ctx, "AGC Status", rx);	/* its answer for that receiver */
+	} else {
 		G.ops.set_value(G.ops.ctx, "AGC Status", idx + 1);
+	}
 }
 
 static void on_agc(lv_event_t *e)
 {
 	const char *const *n = agc_names();
 	const char *names[] = { n[1], n[2], n[3] };
+	const struct radio_value *a = agc_shown();
 
 	(void)e;
-	ui_chooser_open("AGC", names, 3, G.st.agc.valid ? G.st.agc.value - 1 : -1, on_agc_chosen, NULL);
+	ui_chooser_open(agc_rx() == 1 ? "AGC (sub)" : agc_rx() == 0 ? "AGC (main)" : "AGC", names, 3,
+			a->valid ? a->value - 1 : -1, on_agc_chosen, NULL);
 }
 
 static void on_span_chosen(int idx, void *ud)
@@ -1396,6 +1495,8 @@ int ui_create(lv_display_t *disp, const struct ui_ops *ops, const struct ui_font
 	G.h = lv_display_get_vertical_resolution(disp);
 	G.scale = (float)G.w / (float)C_DESIGN_W;
 	G.volume = 128;
+	G.last_mode = -1;
+	state_load();	/* the steps kept (2026-11-22) */
 
 	G.f_small = lv_tiny_ttf_create_data(font->ttf, font->len, U(14));
 	G.f_med = lv_tiny_ttf_create_data(font->ttf, font->len, U(17));
@@ -1617,9 +1718,9 @@ static void update_lines(void)
 	}
 
 	// AGC, attenuator, preamp, split: hidden when the rig has none
-	if (G.st.agc.valid) {
+	if (agc_shown()->valid) {	/* the selected receiver's on a per-receiver AGC rig */
 		lv_obj_remove_flag(G.l_agc, LV_OBJ_FLAG_HIDDEN);
-		set_text_if(G.l_agc, agc_name(G.st.agc.value));
+		set_text_if(G.l_agc, agc_name(agc_shown()->value));
 	} else {
 		lv_obj_add_flag(G.l_agc, LV_OBJ_FLAG_HIDDEN);
 	}
@@ -1934,6 +2035,7 @@ static void update_markers(void)
 void ui_set_ctx(void *ctx)
 {
 	G.ops.ctx = ctx;
+	G.last_mode = -1;	/* the new session begins at 100 Hz: the step kept again (2026-11-22) */
 	G.route_sent = AUDIO_ROUTE_AUTO;	/* the new session starts there; the choice stays and is sent again */
 	G.power_on_sent = false;
 	G.aud_t = 0;

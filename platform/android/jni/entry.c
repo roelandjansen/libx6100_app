@@ -137,6 +137,7 @@ JNIEXPORT void ANativeActivity_onCreate(ANativeActivity *a, void *saved, size_t 
 	a->callbacks->onPause = on_pause;
 	a->callbacks->onDestroy = on_destroy;
 
+	app_set_data_dir(a->internalDataPath);	/* before the UI is made: the steps kept */
 	if (app_start() != 0)
 		__android_log_print(ANDROID_LOG_ERROR, C_TAG, "render thread did not start");
 }
