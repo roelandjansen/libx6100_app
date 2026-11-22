@@ -272,6 +272,43 @@ static lv_obj_t *label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, con
 	return l;
 }
 
+//
+// Labels in a row that change text (AGC FAST / MID / SLOW, ATT OFF / -20 dB, PRE, SQL):
+// a fixed width, the widest text they show, the text centred, so the row does not shift
+// when one changes (2026-11-22). set_text_fixed widens one once for a text not foreseen
+// (a rig's own attenuator name), never narrows it
+//
+
+static int32_t text_w(const lv_font_t *f, const char *s)
+{
+	lv_point_t sz;
+
+	lv_text_get_size(&sz, s, f, 0, 0, LV_COORD_MAX, LV_TEXT_FLAG_NONE);
+	return sz.x;
+}
+
+static void fix_width(lv_obj_t *l, const lv_font_t *f, const char *const *cands, size_t n)
+{
+	int32_t w = 0;
+	size_t i;
+
+	for (i = 0; i < n; i++)
+		if (text_w(f, cands[i]) > w)
+			w = text_w(f, cands[i]);
+	lv_obj_set_width(l, w + 2);
+	lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
+}
+
+static void set_text_fixed(lv_obj_t *l, const char *txt)
+{
+	const int32_t w = text_w(lv_obj_get_style_text_font(l, 0), txt) + 2;
+
+	if (strcmp(lv_label_get_text(l), txt) != 0)
+		lv_label_set_text(l, txt);
+	if (w > lv_obj_get_style_width(l, 0))
+		lv_obj_set_width(l, w);
+}
+
 static lv_obj_t *tap_label(lv_obj_t *parent, const lv_font_t *f, uint32_t color, const char *txt,
 		lv_event_cb_t cb)
 {
@@ -1394,6 +1431,18 @@ static void build_freq(lv_obj_t *scr)
 	lv_obj_add_flag(G.l_dw, LV_OBJ_FLAG_HIDDEN);
 	G.l_sql = tap_label(r, G.f_med, C_DIM, "", on_sql);
 	lv_obj_add_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
+	// Fixed widths, the widest text each shows (2026-11-22: AGC FAST / MID / SLOW moved the row)
+	{
+		static const char *const agc[] = { "AGC FAST", "AGC MID", "AGC SLOW", "AGC AUTO", "AGC OFF" };
+		static const char *const att[] = { "ATT OFF", "ATT -20 dB" };
+		static const char *const pre[] = { "PRE OFF", "PRE 2" };
+		static const char *const sql[] = { "SQL OFF", "SQL 100" };
+
+		fix_width(G.l_agc, G.f_med, agc, sizeof(agc) / sizeof(agc[0]));
+		fix_width(G.l_att, G.f_med, att, sizeof(att) / sizeof(att[0]));
+		fix_width(G.l_pre, G.f_med, pre, sizeof(pre) / sizeof(pre[0]));
+		fix_width(G.l_sql, G.f_med, sql, sizeof(sql) / sizeof(sql[0]));
+	}
 	G.l_split = tap_label(r, G.f_med, C_DIM, "", on_split);
 	lv_obj_add_flag(G.l_split, LV_OBJ_FLAG_HIDDEN);
 }
@@ -1720,7 +1769,7 @@ static void update_lines(void)
 	// AGC, attenuator, preamp, split: hidden when the rig has none
 	if (agc_shown()->valid) {	/* the selected receiver's on a per-receiver AGC rig */
 		lv_obj_remove_flag(G.l_agc, LV_OBJ_FLAG_HIDDEN);
-		set_text_if(G.l_agc, agc_name(agc_shown()->value));
+		set_text_fixed(G.l_agc, agc_name(agc_shown()->value));
 	} else {
 		lv_obj_add_flag(G.l_agc, LV_OBJ_FLAG_HIDDEN);
 	}
@@ -1732,7 +1781,7 @@ static void update_lines(void)
 			if (r->attenuators[i].num == G.st.attenuator.value)
 				name = r->attenuators[i].name;
 		snprintf(buf, sizeof(buf), G.st.attenuator.value ? "ATT %s" : "ATT OFF", name);
-		set_text_if(G.l_att, buf);
+		set_text_fixed(G.l_att, buf);
 		lv_obj_set_style_text_color(G.l_att, lv_color_hex(G.st.attenuator.value ? C_AMBER : C_DIM), 0);
 		lv_obj_remove_flag(G.l_att, LV_OBJ_FLAG_HIDDEN);
 	} else {
@@ -1741,7 +1790,7 @@ static void update_lines(void)
 
 	if (G.st.preamp.valid) {
 		snprintf(buf, sizeof(buf), G.st.preamp.value ? "PRE %d" : "PRE OFF", G.st.preamp.value);
-		set_text_if(G.l_pre, buf);
+		set_text_fixed(G.l_pre, buf);
 		lv_obj_set_style_text_color(G.l_pre, lv_color_hex(G.st.preamp.value ? C_AMBER : C_DIM), 0);
 		lv_obj_remove_flag(G.l_pre, LV_OBJ_FLAG_HIDDEN);
 	} else {
@@ -1784,7 +1833,7 @@ static void update_lines(void)
 	// Squelch: SQL and its level in %, amber while set (rigs with the command)
 	if (r != NULL && rigfile_cmd(r, "Squelch") != NULL && G.st.squelch.valid) {
 		snprintf(buf, sizeof(buf), G.st.squelch.value ? "SQL %d" : "SQL OFF", (G.st.squelch.value * 100 + 127) / 255);
-		set_text_if(G.l_sql, buf);
+		set_text_fixed(G.l_sql, buf);
 		lv_obj_set_style_text_color(G.l_sql, lv_color_hex(G.st.squelch.value ? C_AMBER : C_DIM), 0);
 		lv_obj_remove_flag(G.l_sql, LV_OBJ_FLAG_HIDDEN);
 	} else {
