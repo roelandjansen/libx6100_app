@@ -1601,21 +1601,75 @@ void ui_destroy(void)
 // highest Power reading, rounded to 10 / 100 / 200 W
 //
 
+//
+// TX power per band (2026-11-27: the IC-9700 showed 100 W on 23 cm, where it gives 10 W).
+// The rig files' Po meter tables are in watts for the rig's strongest band; Icom's Po
+// reading is relative to the full power of the band in use. So the watts are the table's
+// times this band's Power over the strongest band's (both from the rig file's Bands)
+//
+
+// The TX frequency: the other VFO / receiver with split, else the receiver's
+static uint64_t tx_freq(void)
+{
+	uint64_t f = 0;
+
+	if (G.st.split.valid && G.st.split.value && other_freq(&f))
+		return f;
+	return G.st.rx[0].freq_valid[0] ? G.st.rx[0].freq_hz[0] : 0;
+}
+
+// The full power of the band TX is on, and of the strongest band, in W; 0 not known
+static void band_powers(double *here, double *top)
+{
+	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
+	const uint64_t f = tx_freq();
+	size_t i;
+
+	*here = 0.0;
+	*top = 0.0;
+	if (r == NULL)
+		return;
+	for (i = 0; i < r->n_bands && i < RIG_MAX_BANDS; i++) {
+		if (r->bands[i].power > *top)
+			*top = r->bands[i].power;
+		if (*here == 0.0 && f >= r->bands[i].start && f <= r->bands[i].end && r->bands[i].power > 0.0)
+			*here = r->bands[i].power;
+	}
+}
+
+// The meter's full scale: 10, 100 or 200 W, from this band's power where the rig file
+// has it, else from the top of its Po table
 static double power_full_scale(void)
 {
 	const struct rig_def *r = G.ops.get_rig(G.ops.ctx);
 	double top = 0.0;
+	double here;
+	double strongest;
 	size_t i;
 
-	if (r != NULL)
+	band_powers(&here, &strongest);
+	if (here > 0.0) {
+		top = here;
+	} else if (r != NULL) {
 		for (i = 0; i < r->n_meters; i++)
 			if (strcmp(r->meters[i].meter, "Power") == 0 && r->meters[i].actual > top)
 				top = r->meters[i].actual;
+	}
 	if (top <= 15.0)
 		return 10.0;
 	if (top <= 150.0)
 		return 100.0;
 	return 200.0;
+}
+
+// The Po meter's watts for the band in use
+static double po_watts(double table_w)
+{
+	double here;
+	double strongest;
+
+	band_powers(&here, &strongest);
+	return here > 0.0 && strongest > 0.0 ? table_w * here / strongest : table_w;
 }
 
 // After a tune the result stays on the meter C_TUNE_HOLD_MS (2026-11-21: the SWR showed
@@ -1645,7 +1699,7 @@ static void update_meter(void)
 
 		if (swr->valid)
 			G.tune_swr = swr->cal;
-		ui_meter_tx(G.vu, po->valid ? po->cal : 0.0, swr->valid ? swr->cal : 1.0, power_full_scale());
+		ui_meter_tx(G.vu, po->valid ? po_watts(po->cal) : 0.0, swr->valid ? swr->cal : 1.0, power_full_scale());
 	} else if (G.tune_hold_t != 0 && t - G.tune_hold_t < C_TUNE_HOLD_MS && G.tune_swr > 0.0) {
 		ui_meter_tx(G.vu, 0.0, G.tune_swr, power_full_scale());
 	} else {

@@ -268,6 +268,8 @@ static void rig_key(struct rig_def *r, const char *key, const char *val)
 			b->end = strtoull(val, NULL, 10);
 		else if (strcmp(f, "Bytes") == 0)
 			b->bytes = to_int(val);
+		else if (strcmp(f, "Power") == 0)
+			b->power = strtod(val, NULL);
 		else if (strcmp(f, "Region") == 0)
 			copy_str(b->region, sizeof(b->region), val);
 		else if (strcmp(f, "Name") == 0)

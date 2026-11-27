@@ -84,6 +84,7 @@ struct rig_band {
 	uint64_t start;
 	uint64_t end;
 	int bytes;
+	double power;		/* the band's full TX power in W (Power; 0 none, 0.5 on the IC-905's 10 GHz), 2026-11-27 */
 	char region[16];
 	char name[RIG_NAME_LEN];
 };
