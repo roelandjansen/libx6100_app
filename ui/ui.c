@@ -1371,6 +1371,7 @@ static void build_meter(lv_obj_t *scr)
 	if (G.vu != NULL)
 		lv_obj_align(ui_meter_obj(G.vu), LV_ALIGN_CENTER, 0, 0);
 	G.l_pwr = tap_label(p, G.f_med, C_DIM, "", on_pwr);
+	lv_obj_set_style_text_align(G.l_pwr, LV_TEXT_ALIGN_RIGHT, 0);	/* the watts under the % (2026-11-27) */
 	lv_obj_align(G.l_pwr, LV_ALIGN_TOP_RIGHT, -U(8), U(6));
 	lv_obj_add_flag(G.l_pwr, LV_OBJ_FLAG_HIDDEN);
 }
@@ -1897,8 +1898,26 @@ static void update_lines(void)
 	// RF power: PWR and its level in %, amber when low (under 10 %; rigs with the command)
 	if (r != NULL && rigfile_cmd(r, "RF Power") != NULL && G.st.rf_power.valid) {
 		const int pct = (G.st.rf_power.value * 100 + 127) / 255;	/* rounded: 254 is 100 % (2026-11-21: 99) */
+		double here;
+		double strongest;
 
-		snprintf(buf, sizeof(buf), "PWR %d%%", pct);
+		// The watts that setting gives (2026-11-27), on a second line: this band's full
+		// power from the rig file, a quarter of it in AM (Icom's AM carrier: 25 W of 100,
+		// 2.5 W of 10 on 23 cm); 0 % reads 0, a little under the rig's real minimum
+		band_powers(&here, &strongest);
+		if (here > 0.0) {
+			const struct radio_mode *tm = G.st.split.valid && G.st.split.value && other_mode() != NULL
+				? other_mode() : &G.st.rx[0].mode[0];
+			const bool am = tm->valid && strncmp(tm->name, "AM", 2) == 0;
+			const double w = here * (am ? 0.25 : 1.0) * (double)G.st.rf_power.value / 255.0;
+
+			if (w < 9.95)
+				snprintf(buf, sizeof(buf), "PWR %d%%\n%.1f W", pct, w);
+			else
+				snprintf(buf, sizeof(buf), "PWR %d%%\n%.0f W", pct, w);
+		} else {
+			snprintf(buf, sizeof(buf), "PWR %d%%", pct);
+		}
 		set_text_if(G.l_pwr, buf);
 		lv_obj_set_style_text_color(G.l_pwr, lv_color_hex(pct < 10 ? C_AMBER : C_ACCENT), 0);
 		lv_obj_remove_flag(G.l_pwr, LV_OBJ_FLAG_HIDDEN);
