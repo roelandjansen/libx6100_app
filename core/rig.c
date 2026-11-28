@@ -600,16 +600,21 @@ static void have_rig_id(struct rig *r, int model)
 	if (r->def.has_spectrum) {
 		add_named(r, RIG_PRIO_HIGH, "Scope On/Off", true, 0, true, 1);
 		add_named(r, RIG_PRIO_HIGH, "Scope Data Output", false, 0, true, 1);
-		for (rx = 0; rx < (uint8_t)r->st.receivers; rx++)
-			add_named(r, RIG_PRIO_MEDIUM_HIGH, "Scope Ref", false, rx, false, 0);
 	}
 
 	// Additions 5 and 6 (agreed, not in wfview): read AGC and the scope span
-	// once at start-up so the UI shows real values; both are in the rig file
+	// once at start-up so the UI shows real values; both are in the rig file.
+	// Addition 11 (2026-11-28): Scope Ref and Scope VBW as well. wfview reads Scope
+	// Ref once at Medium High; that slot is served once in 23 ticks and its
+	// recurring polls rotate ahead of a one-off read, so on an IC-785x the REF
+	// level showed after some ten seconds. VBW was never read
 	add_named(r, RIG_PRIO_IMMEDIATE, "AGC Status", false, 0, false, 0);
 	if (r->def.has_spectrum) {
-		for (rx = 0; rx < (uint8_t)r->st.receivers; rx++)
+		for (rx = 0; rx < (uint8_t)r->st.receivers; rx++) {
 			add_named(r, RIG_PRIO_IMMEDIATE, "Scope Span", false, rx, false, 0);
+			add_named(r, RIG_PRIO_IMMEDIATE, "Scope Ref", false, rx, false, 0);
+			add_named(r, RIG_PRIO_IMMEDIATE, "Scope VBW", false, rx, false, 0);
+		}
 	}
 
 	// Addition 8 (2026-11-28, not in wfview): the selected receiver polled, at High as

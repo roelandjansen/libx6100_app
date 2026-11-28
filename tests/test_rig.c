@@ -540,7 +540,12 @@ static void test_scope_controls(void)
 	static const uint8_t C_SET_REF_POS[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x19, 0x01, 0x00, 0x50, 0x00, 0xfd };
 	static const uint8_t C_SET_VBW[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1d, 0x01, 0x01, 0xfd };
 	static const uint8_t C_SET_DUAL[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x13, 0x01, 0xfd };
+	static const uint8_t C_GET_REF_MAIN[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x19, 0x00, 0xfd };
+	static const uint8_t C_GET_REF_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x19, 0x01, 0xfd };
+	static const uint8_t C_GET_VBW_MAIN[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1d, 0x00, 0xfd };
+	static const uint8_t C_GET_VBW_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1d, 0x01, 0xfd };
 	int64_t t = 0;
+	int ticks;
 
 	memset(&G, 0, sizeof(G));
 	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
@@ -548,6 +553,20 @@ static void test_scope_controls(void)
 	feed(C_ID_7610, sizeof(C_ID_7610));
 	CHECK(G_RIG.have_caps);
 	drain(&t);
+
+	//
+	// REF and VBW of both receivers read at start-up (addition 11): queued at
+	// Immediate after the first reads of the polled commands: some 2.5 s in on an
+	// IC-7610 at 25 ms a tick (within 200 ticks here, with the drain above), not
+	// after the Medium High rotation (some 23 ticks a step)
+	//
+	for (ticks = 0; ticks < 300 && !sent(C_GET_VBW_SUB, sizeof(C_GET_VBW_SUB)); ticks++)
+		tick_n(1, &t);
+	CHECK(sent(C_GET_REF_MAIN, sizeof(C_GET_REF_MAIN)));
+	CHECK(sent(C_GET_REF_SUB, sizeof(C_GET_REF_SUB)));
+	CHECK(sent(C_GET_VBW_MAIN, sizeof(C_GET_VBW_MAIN)));
+	CHECK(sent(C_GET_VBW_SUB, sizeof(C_GET_VBW_SUB)));
+	CHECK(ticks < 140);
 
 	//
 	// Decoding
