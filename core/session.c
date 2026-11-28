@@ -990,6 +990,12 @@ static void flush_ctl(struct session *s)
 			case SESSION_CTL_TUNE:
 				rc = rig_tune(&s->rig, c->vfo, c->a, (uint32_t)c->u);
 				break;
+			case SESSION_CTL_RX_FREQ:
+				rc = rig_set_rx_freq(&s->rig, c->vfo, c->u);
+				break;
+			case SESSION_CTL_RX_TUNE:
+				rc = rig_tune_rx(&s->rig, c->vfo, c->a, (uint32_t)c->u);
+				break;
 			case SESSION_CTL_MODE:
 				rc = rig_set_mode(&s->rig, c->vfo, c->a, c->b, c->c);
 				break;
@@ -1483,6 +1489,35 @@ int session_tune(struct session *s, uint8_t vfo, int steps)
 	memset(&c, 0, sizeof(c));
 	c.op = SESSION_CTL_TUNE;
 	c.vfo = vfo;
+	c.a = steps;
+	c.u = atomic_load(&s->step_hz);
+	return ctl_push(s, &c);
+}
+
+int session_set_rx_freq(struct session *s, uint8_t rx, uint64_t hz)
+{
+	struct ctl_cmd c;
+
+	if (atomic_load(&s->freq_lock))
+		return SESSION_ERR_LOCKED;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_RX_FREQ;
+	c.vfo = rx;
+	c.u = hz;
+	return ctl_push(s, &c);
+}
+
+int session_tune_rx(struct session *s, uint8_t rx, int steps)
+{
+	struct ctl_cmd c;
+
+	if (atomic_load(&s->freq_lock))
+		return SESSION_ERR_LOCKED;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_RX_TUNE;
+	c.vfo = rx;
 	c.a = steps;
 	c.u = atomic_load(&s->step_hz);
 	return ctl_push(s, &c);

@@ -143,6 +143,8 @@ void rig_queue_add(struct rig *r, enum rig_prio prio, const struct rig_item *it,
 
 int rig_set_freq(struct rig *r, uint8_t vfo, uint64_t hz);
 int rig_tune(struct rig *r, uint8_t vfo, int steps, uint32_t step_hz);
+int rig_set_rx_freq(struct rig *r, uint8_t rx, uint64_t hz);	/* rx: 0 selected, 1 unselected receiver */
+int rig_tune_rx(struct rig *r, uint8_t rx, int steps, uint32_t step_hz);
 int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter);
 int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value);
 int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz);

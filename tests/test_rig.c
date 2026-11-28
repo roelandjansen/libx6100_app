@@ -463,6 +463,67 @@ static void test_selected_receiver(void)
 	CHECK(count_sent(C_ASK_X6100, sizeof(C_ASK_X6100)) == 0);
 }
 
+//
+// Addition 9: one receiver set and tuned directly with RX Frequency and its
+// receiver byte (IC-7610); a one-receiver rig has no receiver 1
+//
+
+static void drain(int64_t *t);
+
+static void test_rx_freq(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_SUB_7076[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x01, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
+	static const uint8_t C_SUB_ASK[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x01, 0xfd };
+	static const uint8_t C_SUB_7074[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x01, 0x00, 0x40, 0x07, 0x07, 0x00, 0xfd };
+	static const uint8_t C_MAIN_14074[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x00, 0x00, 0x40, 0x07, 0x14, 0x00, 0xfd };
+	static const uint8_t C_ID_X6100[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
+	int64_t t = 0;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+	drain(&t);
+
+	//
+	// The unselected receiver set: 25 01 + frequency; the model shows it at once and
+	// the set is read back
+	//
+	G.n = 0;
+	CHECK(rig_set_rx_freq(&G_RIG, 1, 7076000) == 0);
+	CHECK(G_RIG.st.rx[1].freq_valid[0] && G_RIG.st.rx[1].freq_hz[0] == 7076000);
+	drain(&t);
+	CHECK(sent(C_SUB_7076, sizeof(C_SUB_7076)));
+	CHECK(sent(C_SUB_ASK, sizeof(C_SUB_ASK)));
+
+	//
+	// Tuned two 1 kHz steps down from there; the selected receiver set too
+	//
+	G.n = 0;
+	CHECK(rig_tune_rx(&G_RIG, 1, -2, 1000) == 0);
+	drain(&t);
+	CHECK(sent(C_SUB_7074, sizeof(C_SUB_7074)));
+	G.n = 0;
+	CHECK(rig_set_rx_freq(&G_RIG, 0, 14074000) == 0);
+	drain(&t);
+	CHECK(sent(C_MAIN_14074, sizeof(C_MAIN_14074)));
+	CHECK(rig_set_rx_freq(&G_RIG, 2, 14074000) == RIG_ERR_RANGE);
+
+	//
+	// One receiver: no receiver 1
+	//
+	memset(&G, 0, sizeof(G));
+	t = 0;
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_X6100, sizeof(C_ID_X6100));
+	CHECK(G_RIG.have_caps && G_RIG.st.receivers == 1);
+	CHECK(rig_set_rx_freq(&G_RIG, 1, 7076000) == RIG_ERR_RANGE);
+	CHECK(rig_set_rx_freq(&G_RIG, 0, 7076000) == 0);
+}
+
 
 //
 // Phase 4: run the scheduler until the queue is idle, collecting frames
@@ -617,6 +678,7 @@ int main(void)
 	test_controls();
 	test_unknown_model();
 	test_selected_receiver();
+	test_rx_freq();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);

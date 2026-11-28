@@ -238,11 +238,18 @@ enum session_ctl_op {
 	SESSION_CTL_GET,
 	SESSION_CTL_PTT,
 	SESSION_CTL_ATU_TUNE,
-	SESSION_CTL_CAPTURE_LOST
+	SESSION_CTL_CAPTURE_LOST,
+	SESSION_CTL_RX_FREQ,
+	SESSION_CTL_RX_TUNE
 };
 
 int session_set_freq(struct session *s, uint8_t vfo, uint64_t hz);
 int session_tune(struct session *s, uint8_t vfo, int steps);
+
+// One receiver of a two-receiver rig: rx 0 the selected, 1 the unselected one (as
+// radio_state.rx[]); RX Frequency with the receiver byte (addition 9)
+int session_set_rx_freq(struct session *s, uint8_t rx, uint64_t hz);
+int session_tune_rx(struct session *s, uint8_t rx, int steps);
 int session_set_mode(struct session *s, uint8_t vfo, int mode_num, int data, int filter);
 int session_set_value(struct session *s, const char *type, uint8_t receiver, int value);
 int session_set_span(struct session *s, uint8_t receiver, uint32_t half_span_hz);

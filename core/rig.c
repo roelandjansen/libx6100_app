@@ -1318,6 +1318,51 @@ int rig_tune(struct rig *r, uint8_t vfo, int steps, uint32_t step_hz)
 }
 
 //
+// Addition 9 (2026-11-28, not in wfview): one receiver of a two-receiver rig set
+// directly, for clients with a frequency per receiver (RS-BA1 style MAIN and SUB).
+// rig_set_freq's vfo is VFO A / B of the selected receiver; the IC-785x, 7610 and
+// 7760 rig files have no Unselected Freq, so the other receiver could not be set.
+// RX Frequency (25) takes the receiver byte: 00 the selected, 01 the unselected
+// receiver, as radio_state.rx[]. Without it the selected receiver falls back to
+// rig_set_freq; the unselected one is then not supported
+//
+
+int rig_set_rx_freq(struct rig *r, uint8_t rx, uint64_t hz)
+{
+	const int cmd = rig_cmd_index(r, "RX Frequency");
+	uint8_t val[8];
+	uint8_t n;
+	int rc;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (rx >= RADIO_MAX_RX || rx >= (uint8_t)r->st.receivers)
+		return RIG_ERR_RANGE;
+	if (cmd < 0 || !r->def.cmds[cmd].set)
+		return rx == 0 ? rig_set_freq(r, 0, hz) : RIG_ERR_UNSUPPORTED;
+
+	n = freq_payload(hz, val);
+	rc = queue_set(r, cmd, rx, val, n, false, 0);
+	if (rc == 0) {
+		r->st.rx[rx].freq_hz[0] = hz;
+		r->st.rx[rx].freq_valid[0] = true;
+		if (r->ev.changed != NULL)
+			r->ev.changed(r->ev.ctx, RADIO_CHG_FREQ);
+	}
+	return rc;
+}
+
+int rig_tune_rx(struct rig *r, uint8_t rx, int steps, uint32_t step_hz)
+{
+	if (rx >= RADIO_MAX_RX)
+		return RIG_ERR_RANGE;
+	if (!r->st.rx[rx].freq_valid[0] || r->st.rx[rx].freq_hz[0] == 0)
+		return RIG_ERR_RANGE;
+
+	return rig_set_rx_freq(r, rx, rig_round_frequency(r->st.rx[rx].freq_hz[0], steps, step_hz));
+}
+
+//
 // Set mode by rig file mode number; data and filter as wfview modeInfo:
 // bcd(reg) [data for Selected/Unselected Mode] [filter if the rig has filters]
 //
