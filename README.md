@@ -11,6 +11,10 @@ Status: working on Android and the Linux desktop against an X6100 (wfserver) and
 
 *Left: X6100 via wfserver, 1.395 MHz AM. Right: IC-7851 over its own LAN port, 7.205 MHz AM.*
 
+<img src="docs/images/x6100_trx_cqww_cw.png" alt="x6100_trx in CQ WW CW" width="600">
+
+*libx6100's `x6100_trx`, the X6100's own front end, whose remote head mode runs on this core; here on its own receiver in CQ WW CW (2026-11-28): 20 m at 14.040 MHz, 10 W, FIL3 at 300 Hz, the RF scope over +-48 kHz full of contest stations and the audio scope beside it.*
+
 ## Features
 
 - Connects to a wfview server or an Icom LAN radio over UDP: host name or IPv4, control port, username, password. The CI-V and audio ports are taken from the radio's announcement.
