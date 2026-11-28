@@ -1697,6 +1697,19 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 	case K_RAW1:
 		val[n++] = (uint8_t)value;
 		break;
+	case K_CW_PITCH:
+		// Addition 14 (2026-11-28): Hz, 300-900 in 5 Hz steps, to the level the
+		// decode above reads back (wfview: level = (Hz - 300) * 255 / 600)
+		if (value < 300 || value > 900)
+			return RIG_ERR_RANGE;
+		n = bcd_encode_int((int)(((double)value - 300.0) * 255.0 / 600.0 + 0.5), val);
+		return queue_set(r, cmd, receiver, val, n, false, 0);
+	case K_KEY_SPEED:
+		// Addition 14: WPM, 6-48, to the level as decoded (level = (WPM - 6) * 6.071)
+		if (value < 6 || value > 48)
+			return RIG_ERR_RANGE;
+		n = bcd_encode_int((int)(((double)value - 6.0) * 6.071 + 0.5), val);
+		return queue_set(r, cmd, receiver, val, n, false, 0);
 	case K_ANTENNA: {
 		// Addition 13: the antenna; its RX-ANT byte as last read, where the rig sends one
 		const int rx = rx_index(r, cmd, receiver);

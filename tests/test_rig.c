@@ -784,6 +784,44 @@ static void test_per_receiver(void)
 	CHECK(sent(C_SET_AF_SUB, sizeof(C_SET_AF_SUB)));
 }
 
+//
+// Addition 14: CW pitch in Hz and key speed in WPM settable, round trip through the
+// decode (IC-7610)
+//
+
+static void test_cw_settings(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_PITCH_600[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x14, 0x09, 0x01, 0x28, 0xfd };
+	static const uint8_t C_WPM_20[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x14, 0x0c, 0x00, 0x85, 0xfd };
+	static const uint8_t C_PITCH_IN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x14, 0x09, 0x01, 0x28, 0xfd };
+	static const uint8_t C_WPM_IN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x14, 0x0c, 0x00, 0x85, 0xfd };
+	int64_t t = 0;
+	int ticks;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "CW Pitch", 0, 600) == 0);
+	CHECK(rig_set_value(&G_RIG, "CW Pitch", 0, 250) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Key Speed", 0, 20) == 0);
+	CHECK(rig_set_value(&G_RIG, "Key Speed", 0, 60) == RIG_ERR_RANGE);
+	for (ticks = 0; ticks < 100 && G.n < 4; ticks++)
+		tick_n(1, &t);
+	CHECK(sent(C_PITCH_600, sizeof(C_PITCH_600)));
+	CHECK(sent(C_WPM_20, sizeof(C_WPM_20)));
+
+	// The levels sent read back as the values set
+	feed(C_PITCH_IN, sizeof(C_PITCH_IN));
+	CHECK(G_RIG.st.cw_pitch.valid && G_RIG.st.cw_pitch.value == 600);
+	feed(C_WPM_IN, sizeof(C_WPM_IN));
+	CHECK(G_RIG.st.key_speed.valid && G_RIG.st.key_speed.value == 20);
+}
+
 static void test_controls(void)
 {
 	static const uint8_t C_F7076[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
@@ -922,6 +960,7 @@ int main(void)
 	test_scope_controls();
 	test_set_order();
 	test_per_receiver();
+	test_cw_settings();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);
