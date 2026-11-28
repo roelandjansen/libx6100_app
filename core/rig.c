@@ -305,6 +305,23 @@ static void slot_insert(struct rig_queue_slot *s, const struct rig_item *it, boo
 	}
 }
 
+// Addition 12 (2026-11-28, not in wfview): a set at Immediate goes ahead of the
+// reads waiting there, behind the sets already waiting, so sets keep their order.
+// wfview serves Immediate oldest first, so a set made in the first seconds waited
+// for the hundred or so start-up reads (some 2.5 s at 25 ms a tick)
+static void slot_insert_set(struct rig_queue_slot *s, const struct rig_item *it)
+{
+	size_t at = s->n;
+
+	if (s->n == RIG_QUEUE_MAX)
+		return;
+	while (at > 0 && s->items[at - 1].has_value)
+		at--;
+	memmove(&s->items[at + 1], &s->items[at], (s->n - at) * sizeof(s->items[0]));
+	s->items[at] = *it;
+	s->n++;
+}
+
 static void slot_remove_equal(struct rig_queue_slot *s, const struct rig_item *it)
 {
 	size_t i = 0;
@@ -375,7 +392,10 @@ void rig_queue_add(struct rig *r, enum rig_prio prio, const struct rig_item *in,
 		slot_insert(&r->q[RIG_PRIO_IMMEDIATE], &now, true);
 	}
 
-	slot_insert(&r->q[prio], &it, false);
+	if (prio == RIG_PRIO_IMMEDIATE && it.has_value)
+		slot_insert_set(&r->q[prio], &it);
+	else
+		slot_insert(&r->q[prio], &it, false);
 }
 
 static void queue_clear(struct rig *r)
@@ -597,9 +617,13 @@ static void have_rig_id(struct rig *r, int model)
 		}
 	}
 
+	// Addition 12: the scope switched on and its data output asked for at Immediate,
+	// ahead of the start-up reads (wfview: High, the rows came some four seconds
+	// in); the recurring Scope On/Off stays until the first row, as wfview
 	if (r->def.has_spectrum) {
 		add_named(r, RIG_PRIO_HIGH, "Scope On/Off", true, 0, true, 1);
-		add_named(r, RIG_PRIO_HIGH, "Scope Data Output", false, 0, true, 1);
+		add_named(r, RIG_PRIO_IMMEDIATE, "Scope On/Off", false, 0, true, 1);
+		add_named(r, RIG_PRIO_IMMEDIATE, "Scope Data Output", false, 0, true, 1);
 	}
 
 	// Additions 5 and 6 (agreed, not in wfview): read AGC and the scope span

@@ -631,6 +631,56 @@ static int sent_bytes(const uint8_t *b, size_t n)
 	return sent(b, n);
 }
 
+//
+// Addition 12: sets at Immediate go ahead of the start-up reads and keep their
+// order; the scope is switched on and its data asked for first
+//
+
+static int sent_at(const uint8_t *frame, size_t len)
+{
+	size_t i;
+
+	for (i = 0; i < G.n && i < C_MAX_OUT; i++) {
+		if (G.len[i] == len && memcmp(G.f[i], frame, len) == 0)
+			return (int)i;
+	}
+	return -1;
+}
+
+static void test_set_order(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_SCOPE_ON[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x10, 0x01, 0xfd };
+	static const uint8_t C_SCOPE_OUT[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x11, 0x01, 0xfd };
+	static const uint8_t C_HOLD_ON[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x17, 0x00, 0x01, 0xfd };
+	static const uint8_t C_SLOW[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1a, 0x00, 0x02, 0xfd };
+	int64_t t = 0;
+	int ticks;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+
+	// The first frames once the rig is known: VFO Main/Sub Band (addition 8, its first
+	// read queued last), then the scope switched on
+	G.n = 0;
+	for (ticks = 0; ticks < 100 && G.n < 3; ticks++)
+		tick_n(1, &t);
+	CHECK(sent_at(C_SCOPE_ON, sizeof(C_SCOPE_ON)) == 1);
+	CHECK(sent_at(C_SCOPE_OUT, sizeof(C_SCOPE_OUT)) == 2);
+
+	// Two sets while the start-up reads wait: both out at once, in order
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "Scope Hold", 0, 1) == 0);
+	CHECK(rig_set_value(&G_RIG, "Scope Speed", 0, 2) == 0);
+	for (ticks = 0; ticks < 100 && G.n < 3; ticks++)
+		tick_n(1, &t);
+	CHECK(sent_at(C_HOLD_ON, sizeof(C_HOLD_ON)) == 0);
+	CHECK(sent_at(C_SLOW, sizeof(C_SLOW)) == 1);
+}
+
 static void test_controls(void)
 {
 	static const uint8_t C_F7076[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
@@ -767,6 +817,7 @@ int main(void)
 	test_selected_receiver();
 	test_rx_freq();
 	test_scope_controls();
+	test_set_order();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);
