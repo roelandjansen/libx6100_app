@@ -97,6 +97,42 @@ struct radio_rx {
 	// Scope configuration
 	//
 	struct radio_scope_cfg scope;
+
+	//
+	// Meter and receiver values of this receiver (addition 13). A Command29 rig
+	// (785x, 7610, 7760) answers these with the receiver byte; the single fields in
+	// radio_state hold whichever receiver answered last. A one-receiver rig, or a
+	// command the rig file does not mark Command29, fills rx[0]
+	//
+	struct radio_meter_value s_meter;
+	struct radio_value af_gain;
+	struct radio_value rf_gain;
+	struct radio_value squelch;
+	struct radio_value nr_level;
+	struct radio_value nb_level;
+	struct radio_value pbt_inner;
+	struct radio_value pbt_outer;
+	struct radio_value filter_width;
+	struct radio_value filter_shape;	/* 0 sharp, 1 soft */
+	struct radio_value agc;
+	struct radio_value preamp;
+	struct radio_value attenuator;	/* dB */
+	struct radio_value antenna;	/* 0 ANT1, 1 ANT2 */
+	struct radio_value antenna_rx;	/* RX-ANT of that antenna (Antenna command, second byte) */
+	struct radio_value rx_antenna;	/* RX Antenna command */
+	struct radio_value noise_blanker;
+	struct radio_value noise_reduction;
+	struct radio_value auto_notch;
+	struct radio_value manual_notch;
+	struct radio_value notch_pos;	/* Notch Filter: 0-255 */
+	struct radio_value apf;		/* Audio Peak Filter: 0 off, else the rig's APF setting */
+	struct radio_value apf_level;	/* APF Type Level: 0-255 */
+	struct radio_value twin_peak;
+	struct radio_value digisel;
+	struct radio_value digisel_shift;	/* 0-255 */
+	struct radio_value ip_plus;
+	struct radio_value af_mute;
+	struct radio_value sql_open;	/* Various Squelch: 1 the squelch is open */
 };
 
 struct radio_state {
@@ -159,6 +195,31 @@ struct radio_state {
 	struct radio_value dial_lock;
 	struct radio_value overflow;
 	struct radio_value filter_width;
+
+	//
+	// Addition 13: decoded (and so settable) since 2026-11-28; the per-receiver
+	// ones are in rx[] as well
+	//
+	struct radio_value filter_shape;
+	struct radio_value antenna;
+	struct radio_value antenna_rx;
+	struct radio_value rx_antenna;
+	struct radio_value manual_notch;
+	struct radio_value notch_pos;
+	struct radio_value apf;
+	struct radio_value apf_level;
+	struct radio_value twin_peak;
+	struct radio_value digisel;
+	struct radio_value digisel_shift;
+	struct radio_value ip_plus;
+	struct radio_value af_mute;
+	struct radio_value sql_open;
+	struct radio_value comp_level;	/* Compressor Level: 0-255 */
+	struct radio_value ssb_tx_bw;	/* SSB TX Bandwidth: 0 wide, 1 mid, 2 narrow */
+	struct radio_value xfc;
+	struct radio_value rit_on;
+	struct radio_value rit_tx;	/* dTX: RIT TX Status */
+	struct radio_value rit_hz;	/* RIT Frequency in Hz, -9999 to +9999 */
 
 	uint32_t frames_decoded;
 	uint32_t frames_unmatched;

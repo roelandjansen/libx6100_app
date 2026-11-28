@@ -49,6 +49,8 @@ enum kind {
 	K_SCOPE_REF,
 	K_SCOPE_SPEED,
 	K_SCOPE_RX_OTHER,	// receiver byte, value ignored (VBW, RBW, center type)
+	K_ANTENNA,		// addition 13: antenna, then its RX-ANT byte
+	K_RIT,			// addition 13: RIT Frequency, BCD 10 / 1 Hz, 1000 / 100 Hz, sign
 	K_IGNORE
 };
 
@@ -56,83 +58,107 @@ struct kind_entry {
 	const char *name;
 	enum kind kind;
 	size_t field;		// offsetof radio_state radio_value, or meter index for K_METER
+	size_t rx_field;	// addition 13: offsetof radio_rx radio_value + 1, 0 none (per receiver)
 };
 
 #define F(m) offsetof(struct radio_state, m)
+#define R(m) (offsetof(struct radio_rx, m) + 1)
 
 static const struct kind_entry C_KINDS[] = {
-	{ "RX Frequency", K_FREQ_RX, 0 },
-	{ "Freq (TRX)", K_FREQ, 0 },
-	{ "Freq Get", K_FREQ, 0 },
-	{ "Selected Freq", K_FREQ, 0 },
-	{ "TX Freq", K_FREQ, 0 },
-	{ "Unselected Freq", K_FREQ_UNSEL, 0 },
-	{ "RX Mode", K_MODE_RX, 0 },
-	{ "Mode (TRX)", K_MODE, 0 },
-	{ "Mode Get", K_MODE, 0 },
-	{ "Selected Mode", K_MODE, 0 },
-	{ "Unselected Mode", K_MODE_UNSEL, 0 },
-	{ "Data Mode Filter", K_DATAMODE_FILTER, 0 },
+	{ "RX Frequency", K_FREQ_RX, 0, 0 },
+	{ "Freq (TRX)", K_FREQ, 0, 0 },
+	{ "Freq Get", K_FREQ, 0, 0 },
+	{ "Selected Freq", K_FREQ, 0, 0 },
+	{ "TX Freq", K_FREQ, 0, 0 },
+	{ "Unselected Freq", K_FREQ_UNSEL, 0, 0 },
+	{ "RX Mode", K_MODE_RX, 0, 0 },
+	{ "Mode (TRX)", K_MODE, 0, 0 },
+	{ "Mode Get", K_MODE, 0, 0 },
+	{ "Selected Mode", K_MODE, 0, 0 },
+	{ "Unselected Mode", K_MODE_UNSEL, 0, 0 },
+	{ "Data Mode Filter", K_DATAMODE_FILTER, 0, 0 },
 
-	{ "Tuning Step", K_BCD1, F(tuning_step) },
-	{ "Attenuator Status", K_BCD1, F(attenuator) },
-	{ "AGC Status", K_BCD1, F(agc) },
-	{ "Preamp Status", K_BCD1, F(preamp) },
-	{ "Break-In Status", K_BCD1, F(break_in) },
-	{ "Tuner/ATU Status", K_BCD1, F(tuner) },
-	{ "VFO Dual Watch", K_BCD1, F(dual_watch) },
-	{ "VFO Main/Sub Band", K_BCD1, F(rx_selected) },
-	{ "Scope Main/Sub", K_BCD1, F(scope_rx) },
-	{ "Scope Single/Dual", K_BCD1, F(scope_dual) },
-	{ "Scope On/Off", K_BOOL, F(scope_on) },
-	{ "Scope Data Output", K_BOOL, F(scope_output) },
-	{ "Split/Duplex", K_RAW1, F(split) },
+	{ "Tuning Step", K_BCD1, F(tuning_step), 0 },
+	{ "Attenuator Status", K_BCD1, F(attenuator), R(attenuator) },
+	{ "AGC Status", K_BCD1, F(agc), R(agc) },
+	{ "Preamp Status", K_BCD1, F(preamp), R(preamp) },
+	{ "Break-In Status", K_BCD1, F(break_in), 0 },
+	{ "Tuner/ATU Status", K_BCD1, F(tuner), 0 },
+	{ "VFO Dual Watch", K_BCD1, F(dual_watch), 0 },
+	{ "VFO Main/Sub Band", K_BCD1, F(rx_selected), 0 },
+	{ "Scope Main/Sub", K_BCD1, F(scope_rx), 0 },
+	{ "Scope Single/Dual", K_BCD1, F(scope_dual), 0 },
+	{ "Scope On/Off", K_BOOL, F(scope_on), 0 },
+	{ "Scope Data Output", K_BOOL, F(scope_output), 0 },
+	{ "Split/Duplex", K_RAW1, F(split), 0 },
 
-	{ "AF Gain", K_BCD2, F(af_gain) },
-	{ "RF Gain", K_BCD2, F(rf_gain) },
-	{ "Squelch", K_BCD2, F(squelch) },
-	{ "NR Level", K_BCD2, F(nr_level) },
-	{ "PBT Inner", K_BCD2, F(pbt_inner) },
-	{ "PBT Outer", K_BCD2, F(pbt_outer) },
-	{ "RF Power", K_BCD2, F(rf_power) },
-	{ "Mic Gain", K_BCD2, F(mic_gain) },
-	{ "NB Level", K_BCD2, F(nb_level) },
-	{ "Monitor Gain", K_BCD2, F(monitor_gain) },
-	{ "Key Speed", K_KEY_SPEED, F(key_speed) },
-	{ "CW Pitch", K_CW_PITCH, F(cw_pitch) },
+	{ "AF Gain", K_BCD2, F(af_gain), R(af_gain) },
+	{ "RF Gain", K_BCD2, F(rf_gain), R(rf_gain) },
+	{ "Squelch", K_BCD2, F(squelch), R(squelch) },
+	{ "NR Level", K_BCD2, F(nr_level), R(nr_level) },
+	{ "PBT Inner", K_BCD2, F(pbt_inner), R(pbt_inner) },
+	{ "PBT Outer", K_BCD2, F(pbt_outer), R(pbt_outer) },
+	{ "RF Power", K_BCD2, F(rf_power), 0 },
+	{ "Mic Gain", K_BCD2, F(mic_gain), 0 },
+	{ "NB Level", K_BCD2, F(nb_level), R(nb_level) },
+	{ "Monitor Gain", K_BCD2, F(monitor_gain), 0 },
+	{ "Key Speed", K_KEY_SPEED, F(key_speed), 0 },
+	{ "CW Pitch", K_CW_PITCH, F(cw_pitch), 0 },
 
-	{ "S Meter", K_METER, RADIO_METER_S },
-	{ "Center Meter", K_METER, RADIO_METER_CENTER },
-	{ "Power Meter", K_METER, RADIO_METER_POWER },
-	{ "SWR Meter", K_METER, RADIO_METER_SWR },
-	{ "ALC Meter", K_METER, RADIO_METER_ALC },
-	{ "Comp Meter", K_METER, RADIO_METER_COMP },
-	{ "Vd Meter", K_METER, RADIO_METER_VD },
-	{ "Id Meter", K_METER, RADIO_METER_ID },
+	{ "S Meter", K_METER, RADIO_METER_S, 0 },
+	{ "Center Meter", K_METER, RADIO_METER_CENTER, 0 },
+	{ "Power Meter", K_METER, RADIO_METER_POWER, 0 },
+	{ "SWR Meter", K_METER, RADIO_METER_SWR, 0 },
+	{ "ALC Meter", K_METER, RADIO_METER_ALC, 0 },
+	{ "Comp Meter", K_METER, RADIO_METER_COMP, 0 },
+	{ "Vd Meter", K_METER, RADIO_METER_VD, 0 },
+	{ "Id Meter", K_METER, RADIO_METER_ID, 0 },
 
-	{ "Noise Blanker", K_BOOL, F(noise_blanker) },
-	{ "Noise Reduction", K_BOOL, F(noise_reduction) },
-	{ "Auto Notch", K_BOOL, F(auto_notch) },
-	{ "Compressor Status", K_BOOL, F(compressor) },
-	{ "Monitor Status", K_BOOL, F(monitor) },
-	{ "Vox Status", K_BOOL, F(vox) },
-	{ "Dial Lock Status", K_BOOL, F(dial_lock) },
-	{ "Overflow Status", K_BOOL, F(overflow) },
-	{ "Transceiver Status", K_BOOL, F(transmit) },
+	{ "Noise Blanker", K_BOOL, F(noise_blanker), R(noise_blanker) },
+	{ "Noise Reduction", K_BOOL, F(noise_reduction), R(noise_reduction) },
+	{ "Auto Notch", K_BOOL, F(auto_notch), R(auto_notch) },
+	{ "Compressor Status", K_BOOL, F(compressor), 0 },
+	{ "Monitor Status", K_BOOL, F(monitor), 0 },
+	{ "Vox Status", K_BOOL, F(vox), 0 },
+	{ "Dial Lock Status", K_BOOL, F(dial_lock), 0 },
+	{ "Overflow Status", K_BOOL, F(overflow), 0 },
+	{ "Transceiver Status", K_BOOL, F(transmit), 0 },
 
-	{ "Transceiver ID", K_TRANSCEIVER_ID, 0 },
-	{ "Filter Width", K_FILTER_WIDTH, F(filter_width) },
+	{ "Transceiver ID", K_TRANSCEIVER_ID, 0, 0 },
+	{ "Filter Width", K_FILTER_WIDTH, F(filter_width), R(filter_width) },
 
-	{ "Scope Wave Data", K_SCOPE_WAVE, 0 },
-	{ "Scope Mode", K_SCOPE_MODE, 0 },
-	{ "Scope Span", K_SCOPE_SPAN, 0 },
-	{ "Scope Edge", K_SCOPE_EDGE, 0 },
-	{ "Scope Hold", K_SCOPE_HOLD, 0 },
-	{ "Scope Ref", K_SCOPE_REF, 0 },
-	{ "Scope Speed", K_SCOPE_SPEED, 0 },
-	{ "Scope VBW", K_SCOPE_RX_OTHER, 0 },
-	{ "Scope RBW", K_SCOPE_RX_OTHER, 0 },
-	{ "Scope Center Type", K_SCOPE_RX_OTHER, 0 },
+	// Addition 13 (2026-11-28): the other receiver controls of RS-BA1 / the IC-7610,
+	// decoded (and so settable); per receiver where the rig file marks them Command29
+	{ "Filter Shape", K_BCD1, F(filter_shape), R(filter_shape) },
+	{ "Antenna", K_ANTENNA, F(antenna), R(antenna) },
+	{ "RX Antenna", K_BCD1, F(rx_antenna), R(rx_antenna) },
+	{ "Manual Notch", K_BCD1, F(manual_notch), R(manual_notch) },
+	{ "Notch Filter", K_BCD2, F(notch_pos), R(notch_pos) },
+	{ "Audio Peak Filter", K_BCD1, F(apf), R(apf) },
+	{ "APF Type Level", K_BCD2, F(apf_level), R(apf_level) },
+	{ "Twin Peak Filter", K_BCD1, F(twin_peak), R(twin_peak) },
+	{ "DIGI-Sel Status", K_BCD1, F(digisel), R(digisel) },
+	{ "DIGI-SEL Shift", K_BCD2, F(digisel_shift), R(digisel_shift) },
+	{ "IP Plus Status", K_BCD1, F(ip_plus), R(ip_plus) },
+	{ "AF Mute Status", K_BCD1, F(af_mute), R(af_mute) },
+	{ "Various Squelch", K_BOOL, F(sql_open), R(sql_open) },
+	{ "Compressor Level", K_BCD2, F(comp_level), 0 },
+	{ "SSB TX Bandwidth", K_BCD1, F(ssb_tx_bw), 0 },
+	{ "XFC Status", K_BCD1, F(xfc), 0 },
+	{ "RIT Status", K_BCD1, F(rit_on), 0 },
+	{ "RIT TX Status", K_BCD1, F(rit_tx), 0 },
+	{ "RIT Frequency", K_RIT, F(rit_hz), 0 },
+
+	{ "Scope Wave Data", K_SCOPE_WAVE, 0, 0 },
+	{ "Scope Mode", K_SCOPE_MODE, 0, 0 },
+	{ "Scope Span", K_SCOPE_SPAN, 0, 0 },
+	{ "Scope Edge", K_SCOPE_EDGE, 0, 0 },
+	{ "Scope Hold", K_SCOPE_HOLD, 0, 0 },
+	{ "Scope Ref", K_SCOPE_REF, 0, 0 },
+	{ "Scope Speed", K_SCOPE_SPEED, 0, 0 },
+	{ "Scope VBW", K_SCOPE_RX_OTHER, 0, 0 },
+	{ "Scope RBW", K_SCOPE_RX_OTHER, 0, 0 },
+	{ "Scope Center Type", K_SCOPE_RX_OTHER, 0, 0 },
 };
 
 static const char *const C_METER_NAMES[RADIO_METER_COUNT] = {
@@ -469,6 +495,16 @@ static void send_item(struct rig *r, const struct rig_item *it)
 
 	f[n++] = r->civ_addr;
 	f[n++] = RIG_CONTROLLER_ADDR;
+
+	// Addition 13 (2026-11-28): a Command29 command goes out with 29 and the receiver
+	// first, as wfview (icomCommander::getCommand). Without it a two-receiver rig
+	// answered and applied every per-receiver read and set for the selected receiver:
+	// the SUB polls of the rig file read MAIN, a set for SUB changed MAIN
+	if (r->def.has_command29 && c->cmd29) {
+		f[n++] = 0x29;
+		f[n++] = it->receiver;
+	}
+
 	memcpy(f + n, c->bytes, c->n);
 	n += c->n;
 
@@ -490,7 +526,8 @@ static void send_item(struct rig *r, const struct rig_item *it)
 		memcpy(f + n, it->val, it->vlen);
 		n += it->vlen;
 
-		// A set of a gettable command queues a get to read the new value back
+		// A set of a gettable command queues a get to read the new value back: next, ahead
+		// of the reads waiting at Immediate (addition 13; it waited for the start-up reads)
 		if (c->get && k != K_SCOPE_RX_OTHER) {
 			get.cmd = it->cmd;
 			get.receiver = it->receiver;
@@ -499,7 +536,8 @@ static void send_item(struct rig *r, const struct rig_item *it)
 			get.value = 0;
 			get.range_check = false;
 			get.vlen = 0;
-			rig_queue_add(r, RIG_PRIO_IMMEDIATE, &get, true);
+			slot_remove_equal(&r->q[RIG_PRIO_IMMEDIATE], &get);
+			slot_insert(&r->q[RIG_PRIO_IMMEDIATE], &get, true);
 		}
 	}
 
@@ -641,6 +679,33 @@ static void have_rig_id(struct rig *r, int model)
 		}
 	}
 
+	// Addition 13 (2026-11-28): the receiver values no rig file polls, read once at
+	// start-up (each receiver's on a Command29 rig) so a client shows the rig's
+	// settings; the ones the rig file polls come with their first poll
+	{
+		static const char *const C_READ_ONCE[] = {
+			"AF Gain", "NR Level", "NB Level", "Filter Width", "Filter Shape", "Auto Notch",
+			"Manual Notch", "Notch Filter", "Audio Peak Filter", "APF Type Level",
+			"Twin Peak Filter", "DIGI-Sel Status", "DIGI-SEL Shift", "IP Plus Status",
+			"AF Mute Status", "Antenna", "RX Antenna", "Compressor Level", "SSB TX Bandwidth",
+			"XFC Status", "RIT Frequency", "RIT Status", "RIT TX Status"
+		};
+		size_t k;
+
+		for (k = 0; k < sizeof(C_READ_ONCE) / sizeof(C_READ_ONCE[0]); k++) {
+			const int cmd = rig_cmd_index(r, C_READ_ONCE[k]);
+			const uint8_t n_rx = cmd >= 0 && r->def.has_command29 && r->def.cmds[cmd].cmd29 ?
+				(uint8_t)r->st.receivers : 1;
+
+			if (cmd < 0 || !r->def.cmds[cmd].get)
+				continue;
+			for (rx = 0; rx < n_rx; rx++) {
+				if (recurring_prio(r, cmd, rx) == RIG_PRIO_NONE)
+					add_named(r, RIG_PRIO_IMMEDIATE, C_READ_ONCE[k], false, rx, false, 0);
+			}
+		}
+	}
+
 	// Addition 8 (2026-11-28, not in wfview): the selected receiver polled, at High as
 	// the frequencies (addition 7). No rig file polls VFO Main/Sub Band and the rig
 	// sends nothing when MAIN / SUB is pressed on it: the selected and unselected
@@ -710,6 +775,55 @@ static void set_value(struct rig *r, size_t off, int v)
 
 	f->valid = true;
 	f->value = v;
+}
+
+// The per-receiver copy of a decoded value (addition 13): the receiver byte of a
+// Command29 answer; rx[0] on a one-receiver rig; none for a command the rig file does
+// not mark Command29 on a two-receiver rig (it answers for the selected receiver)
+static int rx_index(const struct rig *r, int cmd, uint8_t receiver)
+{
+	if (cmd < 0)
+		return -1;
+	if (!r->def.has_command29 || r->st.receivers < 2)
+		return 0;
+	if (!r->def.cmds[cmd].cmd29 || receiver >= RADIO_MAX_RX)
+		return -1;
+	return receiver;
+}
+
+static struct radio_value *rx_field(struct rig *r, const struct kind_entry *ke, int cmd, uint8_t receiver)
+{
+	const int rx = rx_index(r, cmd, receiver);
+
+	if (ke->rx_field == 0 || rx < 0)
+		return NULL;
+	return (struct radio_value *)(void *)((uint8_t *)&r->st.rx[rx] + ke->rx_field - 1);
+}
+
+// A decoded value: the single field, and the receiver's own (addition 13)
+static void store(struct rig *r, const struct kind_entry *ke, int cmd, uint8_t receiver, int v)
+{
+	struct radio_value *rv = rx_field(r, ke, cmd, receiver);
+
+	set_value(r, ke->field, v);
+	if (rv != NULL) {
+		rv->valid = true;
+		rv->value = v;
+	}
+}
+
+// The mode of an absolute receiver (0 MAIN, 1 SUB): rx[0] / rx[1] hold the selected /
+// unselected one
+static const struct radio_mode *receiver_mode(const struct rig *r, uint8_t receiver)
+{
+	const bool sub_selected = r->st.rx_selected.valid && r->st.rx_selected.value == 1;
+	uint8_t slot = receiver;
+
+	if (r->st.receivers < 2 || receiver >= RADIO_MAX_RX)
+		slot = 0;
+	else if (sub_selected)
+		slot = (uint8_t)(1 - receiver);
+	return &r->st.rx[slot].mode[0];
 }
 
 // The receiver's VBW, RBW or Center Type field for a K_SCOPE_RX_OTHER command
@@ -867,7 +981,7 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 				add_named(r, RIG_PRIO_IMMEDIATE, "RX Mode", false, rx, false, 0);
 			}
 		}
-		set_value(r, ke->field, bcd1(d[0]));
+		store(r, ke, cmd, receiver, bcd1(d[0]));
 		// AGC per receiver too (2026-11-22): on a Command29 rig each receiver has its own and
 		// its answer carries the receiver byte; the single field is whichever came last
 		if (ke->field == offsetof(struct radio_state, agc) && receiver < RADIO_MAX_RX) {
@@ -879,13 +993,13 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 	case K_RAW1:
 		if (dl < 1)
 			return 0;
-		set_value(r, ke->field, d[0]);
+		store(r, ke, cmd, receiver, d[0]);
 		return RADIO_CHG_FLAGS;
 
 	case K_BCD2:
 		if (dl < 2)
 			return 0;
-		set_value(r, ke->field, bcd2(d[0], d[1]));
+		store(r, ke, cmd, receiver, bcd2(d[0], d[1]));
 		return RADIO_CHG_LEVELS;
 
 	case K_KEY_SPEED:
@@ -915,6 +1029,9 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 		mv->valid = true;
 		mv->raw = raw;
 		mv->cal = meter_cal(&r->def, (int)ke->field, raw, &mv->red);
+		// The S meter per receiver (addition 13): both are polled on a Command29 rig
+		if (ke->field == RADIO_METER_S && rx_index(r, cmd, receiver) >= 0)
+			r->st.rx[rx_index(r, cmd, receiver)].s_meter = *mv;
 		return RADIO_CHG_METER;
 	}
 
@@ -937,12 +1054,12 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 					queue_del(r, rig_cmd_index(r, C_TX_METERS[m]), 0);
 			}
 		}
-		set_value(r, ke->field, d[0] != 0);
+		store(r, ke, cmd, receiver, d[0] != 0);
 		return RADIO_CHG_FLAGS;
 
 	case K_FILTER_WIDTH: {
 		const int pass = dl >= 1 ? bcd1(d[0]) : 0;
-		const struct radio_mode *m = &r->st.rx[0].mode[0];
+		const struct radio_mode *m = receiver_mode(r, receiver);
 		int calc;
 
 		if (dl < 1)
@@ -953,8 +1070,39 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 			calc = 50 + pass * 50;
 		else
 			calc = 600 + (pass - 10) * 100;
-		set_value(r, ke->field, calc);
+		store(r, ke, cmd, receiver, calc);
 		return RADIO_CHG_MODE;
+	}
+
+	case K_ANTENNA: {
+		// Antenna (addition 13): 12 aa [rr], the antenna and on the IC-7610 / 785x its
+		// RX-ANT setting
+		const int rx = rx_index(r, cmd, receiver);
+
+		if (dl < 1)
+			return 0;
+		store(r, ke, cmd, receiver, d[0]);
+		if (dl >= 2) {
+			set_value(r, offsetof(struct radio_state, antenna_rx), d[1]);
+			if (rx >= 0) {
+				r->st.rx[rx].antenna_rx.valid = true;
+				r->st.rx[rx].antenna_rx.value = d[1];
+			}
+		}
+		return RADIO_CHG_FLAGS;
+	}
+
+	case K_RIT: {
+		// RIT Frequency (addition 13): 21 00 [10 Hz | 1 Hz] [1 kHz | 100 Hz] [sign]
+		int hz;
+
+		if (dl < 2)
+			return 0;
+		hz = bcd1(d[1]) * 100 + bcd1(d[0]);
+		if (dl >= 3 && d[2] != 0)
+			hz = -hz;
+		store(r, ke, cmd, receiver, hz);
+		return RADIO_CHG_FLAGS;
 	}
 
 	case K_SCOPE_WAVE: {
@@ -1522,7 +1670,7 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 	case K_FILTER_WIDTH: {
 		// The width in Hz to the rig's index, as the decode above (2026-11-18): AM 200 Hz
 		// steps from 200, else 50 Hz steps to 500, then 100 Hz steps from 600
-		const struct radio_mode *m = &r->st.rx[0].mode[0];
+		const struct radio_mode *m = receiver_mode(r, receiver);
 		int idx;
 
 		if (m->valid && strcmp(m->name, "AM") == 0)
@@ -1549,6 +1697,29 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 	case K_RAW1:
 		val[n++] = (uint8_t)value;
 		break;
+	case K_ANTENNA: {
+		// Addition 13: the antenna; its RX-ANT byte as last read, where the rig sends one
+		const int rx = rx_index(r, cmd, receiver);
+		const struct radio_value *ant_rx = rx >= 0 ? &r->st.rx[rx].antenna_rx : &r->st.antenna_rx;
+
+		if (value < r->def.cmds[cmd].min || value > r->def.cmds[cmd].max)
+			return RIG_ERR_RANGE;
+		val[n++] = (uint8_t)value;
+		if (r->st.antenna_rx.valid)
+			val[n++] = (uint8_t)(ant_rx->valid ? ant_rx->value : 0);
+		return queue_set(r, cmd, receiver, val, n, false, 0);
+	}
+	case K_RIT: {
+		// Addition 13: Hz, -9999 to +9999, as decoded (the rig file's range is not in Hz)
+		const int hz = value < 0 ? -value : value;
+
+		if (hz > 9999)
+			return RIG_ERR_RANGE;
+		val[n++] = bcd_encode_char(hz % 100);
+		val[n++] = bcd_encode_char(hz / 100);
+		val[n++] = (uint8_t)(value < 0 ? 0x01 : 0x00);
+		return queue_set(r, cmd, receiver, val, n, false, 0);
+	}
 	case K_SCOPE_REF: {
 		// Addition 10 (2026-11-28): tenths of a dB, -30.0 to +30.0 in 0.5 dB steps,
 		// as decoded: 10 / 1 dB, 0.1 dB / 0, sign (-12.5 dB = 12 50 01)

@@ -654,6 +654,8 @@ static void test_set_order(void)
 	static const uint8_t C_SCOPE_OUT[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x11, 0x01, 0xfd };
 	static const uint8_t C_HOLD_ON[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x17, 0x00, 0x01, 0xfd };
 	static const uint8_t C_SLOW[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1a, 0x00, 0x02, 0xfd };
+	static const uint8_t C_ON_ASK[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x10, 0xfd };
+	static const uint8_t C_HOLD_ASK[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x17, 0x00, 0xfd };
 	int64_t t = 0;
 	int ticks;
 
@@ -664,21 +666,122 @@ static void test_set_order(void)
 	CHECK(G_RIG.have_caps);
 
 	// The first frames once the rig is known: VFO Main/Sub Band (addition 8, its first
-	// read queued last), then the scope switched on
+	// read queued last), then the scope switched on, each set read back next (addition 13)
 	G.n = 0;
-	for (ticks = 0; ticks < 100 && G.n < 3; ticks++)
+	for (ticks = 0; ticks < 100 && G.n < 4; ticks++)
 		tick_n(1, &t);
 	CHECK(sent_at(C_SCOPE_ON, sizeof(C_SCOPE_ON)) == 1);
-	CHECK(sent_at(C_SCOPE_OUT, sizeof(C_SCOPE_OUT)) == 2);
+	CHECK(sent_at(C_ON_ASK, sizeof(C_ON_ASK)) == 2);
+	CHECK(sent_at(C_SCOPE_OUT, sizeof(C_SCOPE_OUT)) == 3);
 
-	// Two sets while the start-up reads wait: both out at once, in order
+	// Two sets while the start-up reads wait: out at once, in order, each read back next
 	G.n = 0;
 	CHECK(rig_set_value(&G_RIG, "Scope Hold", 0, 1) == 0);
 	CHECK(rig_set_value(&G_RIG, "Scope Speed", 0, 2) == 0);
-	for (ticks = 0; ticks < 100 && G.n < 3; ticks++)
+	for (ticks = 0; ticks < 100 && G.n < 4; ticks++)
 		tick_n(1, &t);
 	CHECK(sent_at(C_HOLD_ON, sizeof(C_HOLD_ON)) == 0);
-	CHECK(sent_at(C_SLOW, sizeof(C_SLOW)) == 1);
+	CHECK(sent_at(C_HOLD_ASK, sizeof(C_HOLD_ASK)) == 1);
+	CHECK(sent_at(C_SLOW, sizeof(C_SLOW)) == 2);
+}
+
+//
+// Addition 13: values per receiver on a Command29 rig, the new decodes and sets,
+// the start-up reads of what the rig file does not poll (IC-7610)
+//
+
+static void test_per_receiver(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_AF_MAIN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x00, 0x14, 0x01, 0x01, 0x28, 0xfd };
+	static const uint8_t C_AF_SUB[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x01, 0x14, 0x01, 0x00, 0x64, 0xfd };
+	static const uint8_t C_S_MAIN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x00, 0x15, 0x02, 0x01, 0x20, 0xfd };
+	static const uint8_t C_S_SUB[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x01, 0x15, 0x02, 0x00, 0x45, 0xfd };
+	static const uint8_t C_ANT_SUB[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x01, 0x12, 0x01, 0x01, 0xfd };
+	static const uint8_t C_NOTCH_SUB[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x01, 0x16, 0x48, 0x01, 0xfd };
+	static const uint8_t C_NOTCH_POS[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x14, 0x0d, 0x01, 0x28, 0xfd };
+	static const uint8_t C_RIT[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x21, 0x00, 0x50, 0x12, 0x01, 0xfd };
+	static const uint8_t C_TPF_MAIN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x29, 0x00, 0x16, 0x4f, 0x01, 0xfd };
+	static const uint8_t C_SET_RIT[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x21, 0x00, 0x50, 0x12, 0x01, 0xfd };
+	static const uint8_t C_SET_ANT_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x01, 0x12, 0x00, 0x01, 0xfd };
+	static const uint8_t C_SET_NOTCH_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x01, 0x16, 0x48, 0x00, 0xfd };
+	static const uint8_t C_SET_AF_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x01, 0x14, 0x01, 0x02, 0x00, 0xfd };
+	static const uint8_t C_GET_AF_MAIN[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x00, 0x14, 0x01, 0xfd };
+	static const uint8_t C_GET_AF_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x01, 0x14, 0x01, 0xfd };
+	static const uint8_t C_GET_RIT[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x21, 0x00, 0xfd };
+	static const uint8_t C_GET_APF_SUB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x29, 0x01, 0x16, 0x32, 0xfd };
+	const struct radio_state *st = &G_RIG.st;
+	int64_t t = 0;
+	int ticks;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps && st->receivers == 2);
+
+	//
+	// Start-up reads: AF Gain of both receivers, APF of SUB, RIT once (not Command29)
+	//
+	G.n = 0;
+	for (ticks = 0; ticks < 600 && !sent(C_GET_RIT, sizeof(C_GET_RIT)); ticks++)
+		tick_n(1, &t);
+	CHECK(sent(C_GET_AF_MAIN, sizeof(C_GET_AF_MAIN)));
+	CHECK(sent(C_GET_AF_SUB, sizeof(C_GET_AF_SUB)));
+	CHECK(sent(C_GET_APF_SUB, sizeof(C_GET_APF_SUB)));
+	CHECK(sent(C_GET_RIT, sizeof(C_GET_RIT)));
+	CHECK(ticks < 300);
+
+	//
+	// Each receiver its own AF gain and S meter; the single fields the last answer
+	//
+	feed(C_AF_MAIN, sizeof(C_AF_MAIN));
+	feed(C_AF_SUB, sizeof(C_AF_SUB));
+	CHECK(st->rx[0].af_gain.valid && st->rx[0].af_gain.value == 128);
+	CHECK(st->rx[1].af_gain.valid && st->rx[1].af_gain.value == 64);
+	CHECK(st->af_gain.value == 64);
+	feed(C_S_MAIN, sizeof(C_S_MAIN));
+	feed(C_S_SUB, sizeof(C_S_SUB));
+	CHECK(st->rx[0].s_meter.valid && st->rx[0].s_meter.raw == 120);
+	CHECK(st->rx[1].s_meter.valid && st->rx[1].s_meter.raw == 45);
+	CHECK(st->meter[RADIO_METER_S].raw == 45);
+
+	//
+	// New decodes: antenna with RX-ANT, manual notch and TPF per receiver, the notch
+	// position (not Command29: the single field only), RIT -1.25 kHz
+	//
+	feed(C_ANT_SUB, sizeof(C_ANT_SUB));
+	CHECK(st->rx[1].antenna.valid && st->rx[1].antenna.value == 1);
+	CHECK(st->rx[1].antenna_rx.valid && st->rx[1].antenna_rx.value == 1);
+	CHECK(!st->rx[0].antenna.valid);
+	feed(C_NOTCH_SUB, sizeof(C_NOTCH_SUB));
+	CHECK(st->rx[1].manual_notch.valid && st->rx[1].manual_notch.value == 1);
+	CHECK(!st->rx[0].manual_notch.valid);
+	feed(C_TPF_MAIN, sizeof(C_TPF_MAIN));
+	CHECK(st->rx[0].twin_peak.valid && st->rx[0].twin_peak.value == 1);
+	feed(C_NOTCH_POS, sizeof(C_NOTCH_POS));
+	CHECK(st->notch_pos.valid && st->notch_pos.value == 128);
+	CHECK(!st->rx[0].notch_pos.valid && !st->rx[1].notch_pos.valid);
+	feed(C_RIT, sizeof(C_RIT));
+	CHECK(st->rit_hz.valid && st->rit_hz.value == -1250);
+
+	//
+	// Sets: with the receiver prefix where Command29; RIT in Hz; the antenna with
+	// its RX-ANT byte as read
+	//
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "RIT Frequency", 0, -1250) == 0);
+	CHECK(rig_set_value(&G_RIG, "RIT Frequency", 0, 10000) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Antenna", 1, 0) == 0);
+	CHECK(rig_set_value(&G_RIG, "Antenna", 1, 2) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Manual Notch", 1, 0) == 0);
+	CHECK(rig_set_value(&G_RIG, "AF Gain", 1, 200) == 0);
+	for (ticks = 0; ticks < 100 && G.n < 8; ticks++)
+		tick_n(1, &t);
+	CHECK(sent(C_SET_RIT, sizeof(C_SET_RIT)));
+	CHECK(sent(C_SET_ANT_SUB, sizeof(C_SET_ANT_SUB)));
+	CHECK(sent(C_SET_NOTCH_SUB, sizeof(C_SET_NOTCH_SUB)));
+	CHECK(sent(C_SET_AF_SUB, sizeof(C_SET_AF_SUB)));
 }
 
 static void test_controls(void)
@@ -818,6 +921,7 @@ int main(void)
 	test_rx_freq();
 	test_scope_controls();
 	test_set_order();
+	test_per_receiver();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);
