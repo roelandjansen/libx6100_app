@@ -524,6 +524,74 @@ static void test_rx_freq(void)
 	CHECK(rig_set_rx_freq(&G_RIG, 0, 7076000) == 0);
 }
 
+//
+// Addition 10: scope controls an RS-BA1 style scope window needs (IC-7610): REF
+// level in tenths of a dB both ways, VBW per receiver, single / dual scope
+//
+
+static void test_scope_controls(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_REF_SUB[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x27, 0x19, 0x01, 0x12, 0x50, 0x01, 0xfd };
+	static const uint8_t C_VBW_MAIN[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x27, 0x1d, 0x00, 0x01, 0xfd };
+	static const uint8_t C_DUAL[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x27, 0x13, 0x01, 0xfd };
+	static const uint8_t C_OUTPUT[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x27, 0x11, 0x01, 0xfd };
+	static const uint8_t C_SET_REF[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x19, 0x00, 0x12, 0x50, 0x01, 0xfd };
+	static const uint8_t C_SET_REF_POS[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x19, 0x01, 0x00, 0x50, 0x00, 0xfd };
+	static const uint8_t C_SET_VBW[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x1d, 0x01, 0x01, 0xfd };
+	static const uint8_t C_SET_DUAL[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x27, 0x13, 0x01, 0xfd };
+	int64_t t = 0;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+	drain(&t);
+
+	//
+	// Decoding
+	//
+	feed(C_REF_SUB, sizeof(C_REF_SUB));
+	CHECK(G_RIG.st.rx[1].scope.ref.valid && G_RIG.st.rx[1].scope.ref.value == -125);
+	feed(C_VBW_MAIN, sizeof(C_VBW_MAIN));
+	CHECK(G_RIG.st.rx[0].scope.vbw.valid && G_RIG.st.rx[0].scope.vbw.value == 1);
+	CHECK(!G_RIG.st.rx[1].scope.vbw.valid);
+	feed(C_DUAL, sizeof(C_DUAL));
+	CHECK(G_RIG.st.scope_dual.valid && G_RIG.st.scope_dual.value == 1);
+	feed(C_OUTPUT, sizeof(C_OUTPUT));
+	CHECK(G_RIG.st.scope_output.valid && G_RIG.st.scope_output.value == 1);
+
+	//
+	// REF level: -12.5 dB on MAIN, +0.5 dB on SUB; off the 0.5 dB grid or past 30 dB refused
+	//
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "Scope Ref", 0, -125) == 0);
+	CHECK(rig_set_value(&G_RIG, "Scope Ref", 1, 5) == 0);
+	CHECK(rig_set_value(&G_RIG, "Scope Ref", 0, 3) == RIG_ERR_RANGE);
+	CHECK(rig_set_value(&G_RIG, "Scope Ref", 0, -305) == RIG_ERR_RANGE);
+	drain(&t);
+	CHECK(sent(C_SET_REF, sizeof(C_SET_REF)));
+	CHECK(sent(C_SET_REF_POS, sizeof(C_SET_REF_POS)));
+
+	//
+	// VBW on SUB: sent with the receiver byte, shown at once
+	//
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "Scope VBW", 1, 1) == 0);
+	CHECK(G_RIG.st.rx[1].scope.vbw.valid && G_RIG.st.rx[1].scope.vbw.value == 1);
+	drain(&t);
+	CHECK(sent(C_SET_VBW, sizeof(C_SET_VBW)));
+
+	//
+	// Both receivers' scopes
+	//
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "Scope Single/Dual", 0, 1) == 0);
+	drain(&t);
+	CHECK(sent(C_SET_DUAL, sizeof(C_SET_DUAL)));
+}
+
 
 //
 // Phase 4: run the scheduler until the queue is idle, collecting frames
@@ -679,6 +747,7 @@ int main(void)
 	test_unknown_model();
 	test_selected_receiver();
 	test_rx_freq();
+	test_scope_controls();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);

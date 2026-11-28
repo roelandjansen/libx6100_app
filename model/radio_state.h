@@ -67,7 +67,10 @@ struct radio_scope_cfg {
 	struct radio_value edge;
 	struct radio_value hold;
 	struct radio_value speed;
-	struct radio_value ref;
+	struct radio_value ref;		/* tenths of a dB: -125 = -12.5 dB */
+	struct radio_value vbw;		/* 0 narrow, 1 wide */
+	struct radio_value rbw;		/* 0 wide, 1 mid, 2 narrow */
+	struct radio_value center_type;	/* 0 filter centre, 1 carrier point centre, 2 carrier point centre (abs. freq.) */
 };
 
 struct radio_scope_row {
@@ -141,6 +144,9 @@ struct radio_state {
 	struct radio_value dual_watch;	// VFO Dual Watch: 0 off, 1 on (two receivers)
 	struct radio_value rx_selected;	// VFO Main/Sub Band: 0 main, 1 sub is the selected (active) receiver
 	struct radio_value scope_rx;	// Scope Main/Sub: 0 main, 1 sub on the (single) scope
+	struct radio_value scope_dual;	// Scope Single/Dual: 0 one scope, 1 both receivers (addition 10)
+	struct radio_value scope_on;	// Scope On/Off
+	struct radio_value scope_output;	// Scope Data Output: the rig sends Scope Wave Data
 	struct radio_value split;
 	struct radio_value transmit;
 	struct radio_value noise_blanker;

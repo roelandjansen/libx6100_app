@@ -83,6 +83,9 @@ static const struct kind_entry C_KINDS[] = {
 	{ "VFO Dual Watch", K_BCD1, F(dual_watch) },
 	{ "VFO Main/Sub Band", K_BCD1, F(rx_selected) },
 	{ "Scope Main/Sub", K_BCD1, F(scope_rx) },
+	{ "Scope Single/Dual", K_BCD1, F(scope_dual) },
+	{ "Scope On/Off", K_BOOL, F(scope_on) },
+	{ "Scope Data Output", K_BOOL, F(scope_output) },
 	{ "Split/Duplex", K_RAW1, F(split) },
 
 	{ "AF Gain", K_BCD2, F(af_gain) },
@@ -680,6 +683,23 @@ static void set_value(struct rig *r, size_t off, int v)
 	f->value = v;
 }
 
+// The receiver's VBW, RBW or Center Type field for a K_SCOPE_RX_OTHER command
+static struct radio_value *scope_other(struct rig *r, int cmd, uint8_t rx)
+{
+	const char *type;
+
+	if (cmd < 0 || rx >= RADIO_MAX_RX)
+		return NULL;
+	type = r->def.cmds[cmd].type;
+	if (strcmp(type, "Scope VBW") == 0)
+		return &r->st.rx[rx].scope.vbw;
+	if (strcmp(type, "Scope RBW") == 0)
+		return &r->st.rx[rx].scope.rbw;
+	if (strcmp(type, "Scope Center Type") == 0)
+		return &r->st.rx[rx].scope.center_type;
+	return NULL;
+}
+
 //
 // parseCommand: payload after FE FE to from, FD removed
 //
@@ -994,8 +1014,21 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 		r->st.rx[d[0]].scope.speed.value = d[1];
 		return RADIO_CHG_SCOPE_CFG;
 
+	case K_SCOPE_RX_OTHER: {
+		// Addition 10 (2026-11-28): VBW, RBW and Center Type kept per receiver
+		struct radio_value *v;
+
+		if (dl < 2)
+			return 0;
+		v = scope_other(r, cmd, d[0]);
+		if (v == NULL)
+			return 0;
+		v->valid = true;
+		v->value = bcd1(d[1]);
+		return RADIO_CHG_SCOPE_CFG;
+	}
+
 	case K_TRANSCEIVER_ID:
-	case K_SCOPE_RX_OTHER:
 	case K_NONE:
 	case K_IGNORE:
 		break;
@@ -1487,6 +1520,35 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 	case K_RAW1:
 		val[n++] = (uint8_t)value;
 		break;
+	case K_SCOPE_REF: {
+		// Addition 10 (2026-11-28): tenths of a dB, -30.0 to +30.0 in 0.5 dB steps,
+		// as decoded: 10 / 1 dB, 0.1 dB / 0, sign (-12.5 dB = 12 50 01)
+		const int tenths = value < 0 ? -value : value;
+
+		if (tenths > 300 || tenths % 5 != 0)
+			return RIG_ERR_RANGE;
+		n = bcd_encode_int(tenths * 10, val);
+		val[n++] = (uint8_t)(value < 0 ? 0x01 : 0x00);
+		return queue_set(r, cmd, receiver, val, n, false, 0);
+	}
+	case K_SCOPE_RX_OTHER: {
+		// VBW, RBW, Center Type: no read-back after a set (wfview), so the model
+		// shows the new value at once
+		struct radio_value *v = scope_other(r, cmd, receiver);
+		int rc;
+
+		if (v == NULL || value < 0 || value > 9)
+			return RIG_ERR_RANGE;
+		val[n++] = bcd_encode_char(value);
+		rc = queue_set(r, cmd, receiver, val, n, true, value);
+		if (rc == 0) {
+			v->valid = true;
+			v->value = value;
+			if (r->ev.changed != NULL)
+				r->ev.changed(r->ev.ctx, RADIO_CHG_SCOPE_CFG);
+		}
+		return rc;
+	}
 	default:
 		return RIG_ERR_UNSUPPORTED;
 	}
