@@ -822,6 +822,34 @@ static void test_cw_settings(void)
 	CHECK(G_RIG.st.key_speed.valid && G_RIG.st.key_speed.value == 20);
 }
 
+//
+// Addition 15: the unselected receiver's mode through RX Mode where the rig file has
+// no Unselected Mode (IC-7610); the selected one through Mode Set as before
+//
+
+static void test_rx_mode(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_SUB_CW[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x26, 0x01, 0x03, 0x00, 0x01, 0xfd };
+	static const uint8_t C_MAIN_USB[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x06, 0x01, 0x02, 0xfd };
+	int64_t t = 0;
+	int ticks;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+
+	G.n = 0;
+	CHECK(rig_set_mode(&G_RIG, 1, 3, 0, 1) == 0);
+	CHECK(rig_set_mode(&G_RIG, 0, 1, 0, 2) == 0);
+	for (ticks = 0; ticks < 100 && G.n < 4; ticks++)
+		tick_n(1, &t);
+	CHECK(sent(C_SUB_CW, sizeof(C_SUB_CW)));
+	CHECK(sent(C_MAIN_USB, sizeof(C_MAIN_USB)));
+}
+
 static void test_controls(void)
 {
 	static const uint8_t C_F7076[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
@@ -961,6 +989,7 @@ int main(void)
 	test_set_order();
 	test_per_receiver();
 	test_cw_settings();
+	test_rx_mode();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);

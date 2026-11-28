@@ -1601,6 +1601,22 @@ int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter)
 		return RIG_ERR_RANGE;
 
 	cmd = mode_cmd(r, vfo);
+
+	// Addition 15 (2026-11-28): the unselected receiver of a rig whose file has no
+	// Unselected Mode (IC-7610, 7760, 785x: RX Mode only) through RX Mode with the
+	// receiver byte (26 01 mode data filter), as addition 9 sets its frequency. Its
+	// mode could not be set at all: the set was refused on the network thread
+	if (cmd < 0 && vfo == 1) {
+		cmd = rig_cmd_index(r, "RX Mode");
+		if (cmd < 0)
+			return RIG_ERR_UNSUPPORTED;
+		val[n++] = bcd_encode_char(reg);
+		val[n++] = (uint8_t)data;
+		if (r->def.n_filters > 0 && !wfm)
+			val[n++] = (uint8_t)filter;
+		return queue_set(r, cmd, 1, val, n, false, 0);
+	}
+
 	val[n++] = bcd_encode_char(reg);
 	if (cmd >= 0 && (r->kind[cmd] == K_MODE || r->kind[cmd] == K_MODE_UNSEL))
 		val[n++] = (uint8_t)data;
