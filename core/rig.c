@@ -609,6 +609,15 @@ static void have_rig_id(struct rig *r, int model)
 			add_named(r, RIG_PRIO_IMMEDIATE, "Scope Span", false, rx, false, 0);
 	}
 
+	// Addition 8 (2026-11-28, not in wfview): the selected receiver polled, at High as
+	// the frequencies (addition 7). No rig file polls VFO Main/Sub Band and the rig
+	// sends nothing when MAIN / SUB is pressed on it: the selected and unselected
+	// frequency and mode (25 00 / 25 01, rx[0] / rx[1]) then traded places with
+	// rx_selected left as it was, so a client could not tell which one is MAIN.
+	// Rigs with two receivers only; not added when the rig file lacks the command
+	if (r->st.receivers > 1)
+		add_named(r, RIG_PRIO_HIGH, "VFO Main/Sub Band", true, 0, false, 0);
+
 	if (r->ev.changed != NULL)
 		r->ev.changed(r->ev.ctx, RADIO_CHG_RIG);
 }

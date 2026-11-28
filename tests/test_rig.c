@@ -397,6 +397,72 @@ static void test_unknown_model(void)
 	CHECK(strcmp(G.err, "unknown model 0x55: no rig file") == 0);
 }
 
+//
+// Addition 8: the selected receiver polled on a two-receiver rig (IC-7610), not on a
+// one-receiver rig (X6100); a change of it re-reads both receivers' frequency
+//
+
+static size_t count_sent(const uint8_t *frame, size_t len)
+{
+	size_t i;
+	size_t n = 0;
+
+	for (i = 0; i < G.n && i < C_MAX_OUT; i++) {
+		if (G.len[i] == len && memcmp(G.f[i], frame, len) == 0)
+			n++;
+	}
+	return n;
+}
+
+static void test_selected_receiver(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_ASK_7610[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x07, 0xd2, 0xfd };
+	static const uint8_t C_SUB_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x07, 0xd2, 0x01, 0xfd };
+	static const uint8_t C_RXF0_7610[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x00, 0xfd };
+	static const uint8_t C_RXF1_7610[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x25, 0x01, 0xfd };
+	static const uint8_t C_ID_X6100[] = { 0xfe, 0xfe, 0xe1, 0x61, 0x19, 0x00, 0x61, 0xfd };
+	static const uint8_t C_ASK_X6100[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x07, 0xd2, 0xfd };
+	int64_t t = 0;
+
+	//
+	// IC-7610: asked again and again, as a recurring poll
+	//
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps && G_RIG.st.receivers == 2);
+	tick_n(300, &t);
+	G.n = 0;
+	tick_n(400, &t);
+	CHECK(count_sent(C_ASK_7610, sizeof(C_ASK_7610)) >= 3);
+
+	//
+	// SUB pressed on the rig: rx_selected follows, both receivers are read again
+	//
+	CHECK(!G_RIG.st.rx_selected.valid || G_RIG.st.rx_selected.value == 0);
+	G.n = 0;
+	feed(C_SUB_7610, sizeof(C_SUB_7610));
+	CHECK(G_RIG.st.rx_selected.valid && G_RIG.st.rx_selected.value == 1);
+	tick_n(20, &t);
+	CHECK(sent(C_RXF0_7610, sizeof(C_RXF0_7610)));
+	CHECK(sent(C_RXF1_7610, sizeof(C_RXF1_7610)));
+
+	//
+	// X6100 (one receiver): never asked
+	//
+	memset(&G, 0, sizeof(G));
+	t = 0;
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_X6100, sizeof(C_ID_X6100));
+	CHECK(G_RIG.have_caps && G_RIG.st.receivers == 1);
+	G.n = 0;
+	tick_n(700, &t);
+	CHECK(count_sent(C_ASK_X6100, sizeof(C_ASK_X6100)) == 0);
+}
+
 
 //
 // Phase 4: run the scheduler until the queue is idle, collecting frames
@@ -550,6 +616,7 @@ int main(void)
 	test_scope();
 	test_controls();
 	test_unknown_model();
+	test_selected_receiver();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);
