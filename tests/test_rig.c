@@ -850,6 +850,57 @@ static void test_rx_mode(void)
 	CHECK(sent(C_MAIN_USB, sizeof(C_MAIN_USB)));
 }
 
+//
+// Addition 16: CW text and the voice TX memories (IC-7610)
+//
+
+static void test_cw_voice(void)
+{
+	static const uint8_t C_ID_7610[] = { 0xfe, 0xfe, 0xe1, 0x98, 0x19, 0x00, 0x98, 0xfd };
+	static const uint8_t C_CQ[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x17, 'C', 'Q', ' ', 'T', 'E', 'S', 'T', 0xfd };
+	static const uint8_t C_DE[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x17, 'D', 'E', ' ', 'P', 'A', '3', 'X', 0xfd };
+	static const uint8_t C_LOST[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x17, 'K', 0xfd };
+	static const uint8_t C_STOP[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x17, 0xff, 0xfd };
+	static const uint8_t C_T3[] = { 0xfe, 0xfe, 0x98, 0xe1, 0x28, 0x00, 0x03, 0xfd };
+	int64_t t = 0;
+	int cq;
+	int de;
+
+	memset(&G, 0, sizeof(G));
+	rig_init(&G_RIG, "rigs", 115200, 0, &C_EV, 0);
+	tick_n(3, &t);
+	feed(C_ID_7610, sizeof(C_ID_7610));
+	CHECK(G_RIG.have_caps);
+
+	// Upper case, the characters the rig cannot key dropped; two texts in order
+	G.n = 0;
+	CHECK(rig_send_cw(&G_RIG, "cq #test") == 0);
+	CHECK(rig_send_cw(&G_RIG, "de pa3x") == 0);
+	CHECK(rig_send_cw(&G_RIG, "#~") == RIG_ERR_RANGE);
+	for (int i = 0; i < 100 && G.n < 2; i++)
+		tick_n(1, &t);
+	cq = sent_at(C_CQ, sizeof(C_CQ));
+	de = sent_at(C_DE, sizeof(C_DE));
+	CHECK(cq >= 0 && de > cq);
+
+	// Stop: what has not gone out is dropped, 17 FF goes out
+	G.n = 0;
+	CHECK(rig_send_cw(&G_RIG, "k") == 0);
+	CHECK(rig_stop_cw(&G_RIG) == 0);
+	for (int i = 0; i < 100 && G.n < 1; i++)
+		tick_n(1, &t);
+	CHECK(sent(C_STOP, sizeof(C_STOP)));
+	CHECK(!sent(C_LOST, sizeof(C_LOST)));
+
+	// Voice TX memory T3; 9 is past the rig file's range
+	G.n = 0;
+	CHECK(rig_set_value(&G_RIG, "Voice TX Memory", 0, 3) == 0);
+	CHECK(rig_set_value(&G_RIG, "Voice TX Memory", 0, 9) == RIG_ERR_RANGE);
+	for (int i = 0; i < 100 && G.n < 1; i++)
+		tick_n(1, &t);
+	CHECK(sent(C_T3, sizeof(C_T3)));
+}
+
 static void test_controls(void)
 {
 	static const uint8_t C_F7076[] = { 0xfe, 0xfe, 0x61, 0xe1, 0x25, 0x00, 0x00, 0x60, 0x07, 0x07, 0x00, 0xfd };
@@ -990,6 +1041,7 @@ int main(void)
 	test_per_receiver();
 	test_cw_settings();
 	test_rx_mode();
+	test_cw_voice();
 
 	if (G_FAILS != 0) {
 		fprintf(stderr, "test_rig: %d failure(s)\n", G_FAILS);

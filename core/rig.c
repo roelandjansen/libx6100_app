@@ -51,6 +51,8 @@ enum kind {
 	K_SCOPE_RX_OTHER,	// receiver byte, value ignored (VBW, RBW, center type)
 	K_ANTENNA,		// addition 13: antenna, then its RX-ANT byte
 	K_RIT,			// addition 13: RIT Frequency, BCD 10 / 1 Hz, 1000 / 100 Hz, sign
+	K_SET_BCD1,		// addition 16: a set-only value, one BCD byte (Voice TX Memory)
+	K_SEND_CW,		// addition 16: Send CW (ASCII text, FF stops)
 	K_IGNORE
 };
 
@@ -148,6 +150,11 @@ static const struct kind_entry C_KINDS[] = {
 	{ "RIT Status", K_BCD1, F(rit_on), 0 },
 	{ "RIT TX Status", K_BCD1, F(rit_tx), 0 },
 	{ "RIT Frequency", K_RIT, F(rit_hz), 0 },
+
+	// Addition 16 (2026-11-28): CW text and the voice TX memories (Voice TX Memory is a
+	// libx6100_app rig file entry: 28 00, 0 stop, 1-8 play T1-T8)
+	{ "Send CW", K_SEND_CW, 0, 0 },
+	{ "Voice TX Memory", K_SET_BCD1, 0, 0 },
 
 	{ "Scope Wave Data", K_SCOPE_WAVE, 0, 0 },
 	{ "Scope Mode", K_SCOPE_MODE, 0, 0 },
@@ -1205,6 +1212,8 @@ static uint32_t parse_command(struct rig *r, const uint8_t *p, size_t len, uint8
 		return RADIO_CHG_SCOPE_CFG;
 	}
 
+	case K_SET_BCD1:
+	case K_SEND_CW:
 	case K_TRANSCEIVER_ID:
 	case K_NONE:
 	case K_IGNORE:
@@ -1713,6 +1722,12 @@ int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value)
 	case K_RAW1:
 		val[n++] = (uint8_t)value;
 		break;
+	case K_SET_BCD1:
+		// Addition 16: one BCD byte in the rig file's range (Voice TX Memory 0-8)
+		if (value < 0 || value > 99)
+			return RIG_ERR_RANGE;
+		val[n++] = bcd_encode_char(value);
+		break;
 	case K_CW_PITCH:
 		// Addition 14 (2026-11-28): Hz, 300-900 in 5 Hz steps, to the level the
 		// decode above reads back (wfview: level = (Hz - 300) * 255 / 600)
@@ -1808,6 +1823,60 @@ int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz)
 
 	n = freq_payload(half_span_hz, val);
 	return queue_set(r, cmd, receiver, val, n, false, 0);
+}
+
+//
+// CW text (addition 16, 2026-11-28): Send CW, 17 + up to 30 characters a frame, as
+// wfview; 17 FF stops the rig sending
+//
+
+// The characters an Icom keys (CI-V reference, 17): letters, digits, space and / ? .
+// , - = + @ ' ( ) ; lower case goes up, the rest is dropped
+static bool cw_char(int c)
+{
+	return (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == ' ' || strchr("/?.,-=+@'()", c) != NULL;
+}
+
+int rig_send_cw(struct rig *r, const char *text)
+{
+	const int cmd = rig_cmd_index(r, "Send CW");
+	struct rig_item it;
+	uint8_t n = 0;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	if (cmd < 0 || !r->def.cmds[cmd].set)
+		return RIG_ERR_UNSUPPORTED;
+	for (const char *p = text; *p != '\0' && n < 30; p++) {
+		const int c = *p >= 'a' && *p <= 'z' ? *p - 'a' + 'A' : (unsigned char)*p;
+
+		if (c != '\0' && cw_char(c))
+			it.val[n++] = (uint8_t)c;
+	}
+	if (n == 0)
+		return RIG_ERR_RANGE;
+
+	// Not unique: the frames of a longer text go out in order, after the sets waiting
+	it.cmd = cmd;
+	it.receiver = 0;
+	it.recurring = false;
+	it.has_value = true;
+	it.value = 0;
+	it.range_check = false;
+	it.vlen = n;
+	rig_queue_add(r, RIG_PRIO_IMMEDIATE, &it, false);
+	return 0;
+}
+
+int rig_stop_cw(struct rig *r)
+{
+	const int cmd = rig_cmd_index(r, "Send CW");
+	const uint8_t stop = 0xff;
+
+	if (!r->have_caps)
+		return RIG_ERR_NO_CAPS;
+	// Unique: the text still waiting goes too
+	return queue_set(r, cmd, 0, &stop, 1, false, 0);
 }
 
 //

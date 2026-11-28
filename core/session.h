@@ -240,7 +240,8 @@ enum session_ctl_op {
 	SESSION_CTL_ATU_TUNE,
 	SESSION_CTL_CAPTURE_LOST,
 	SESSION_CTL_RX_FREQ,
-	SESSION_CTL_RX_TUNE
+	SESSION_CTL_RX_TUNE,
+	SESSION_CTL_CW		/* addition 16: name = up to 30 characters, a = 1 stop */
 };
 
 int session_set_freq(struct session *s, uint8_t vfo, uint64_t hz);
@@ -278,6 +279,11 @@ void tx_set_mic_gain(struct session *s, int percent);
 void tx_set_test_tone(struct session *s, int on);	/* 1 kHz at -6 dBFS in place of the mic */
 void tx_set_mic_mute(struct session *s, int on);	/* silence in place of the mic */
 int session_send_cmd(struct session *s, const char *type);	/* a rig file command without a value */
+
+// CW text through the rig (addition 16): Send CW, 30 characters a frame, in order;
+// stop drops what has not gone out and stops the rig sending
+int session_send_cw(struct session *s, const char *text);
+int session_stop_cw(struct session *s);
 void tx_set_ptt_timeout(struct session *s, int enabled, int seconds);
 
 //

@@ -25,6 +25,7 @@
 
 #define RIG_CONTROLLER_ADDR	0xe1
 #define RIG_QUEUE_MAX		256
+#define RIG_VAL_MAX		32	/* value bytes of a queued item: CW text, 30 characters (addition 16) */
 #define RIG_PRIO_COUNT		24
 
 enum rig_prio {
@@ -47,7 +48,7 @@ struct rig_item {
 	int value;		// for the min/max range check (int-like values only)
 	bool range_check;
 	uint8_t vlen;		// encoded value bytes appended after the command
-	uint8_t val[8];
+	uint8_t val[RIG_VAL_MAX];
 };
 
 #define RIG_CMD_ID	(-2)
@@ -148,6 +149,11 @@ int rig_tune_rx(struct rig *r, uint8_t rx, int steps, uint32_t step_hz);
 int rig_set_mode(struct rig *r, uint8_t vfo, int mode_num, int data, int filter);
 int rig_set_value(struct rig *r, const char *type, uint8_t receiver, int value);
 int rig_set_span(struct rig *r, uint8_t receiver, uint32_t half_span_hz);
+
+// Addition 16: CW text (Send CW, 30 characters a frame; letters, digits and the
+// characters the rig keys, the rest dropped) and stopping it (also drops what waits)
+int rig_send_cw(struct rig *r, const char *text);
+int rig_stop_cw(struct rig *r);
 int rig_get(struct rig *r, const char *type, uint8_t receiver);
 uint64_t rig_round_frequency(uint64_t freq, int steps, uint32_t step_hz);
 

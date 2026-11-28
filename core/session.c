@@ -999,6 +999,9 @@ static void flush_ctl(struct session *s)
 			case SESSION_CTL_MODE:
 				rc = rig_set_mode(&s->rig, c->vfo, c->a, c->b, c->c);
 				break;
+			case SESSION_CTL_CW:
+				rc = c->a != 0 ? rig_stop_cw(&s->rig) : rig_send_cw(&s->rig, c->name);
+				break;
 			case SESSION_CTL_VALUE:
 				rc = rig_set_value(&s->rig, c->name, c->vfo, c->a);
 				break;
@@ -1723,4 +1726,42 @@ const struct rig_def *session_rig_def(struct session *s)
 	valid = s->state.rig_valid;
 	pthread_mutex_unlock(&s->lock);
 	return valid ? &s->rig.def : NULL;
+}
+
+//
+// CW text (addition 16)
+//
+
+int session_send_cw(struct session *s, const char *text)
+{
+	const size_t len = strlen(text);
+	size_t at = 0;
+
+	if (len == 0)
+		return -1;
+	while (at < len) {
+		struct ctl_cmd c;
+		const size_t n = len - at > 30 ? 30 : len - at;
+		int rc;
+
+		memset(&c, 0, sizeof(c));
+		c.op = SESSION_CTL_CW;
+		memcpy(c.name, text + at, n);
+		c.name[n] = '\0';
+		rc = ctl_push(s, &c);
+		if (rc != 0)
+			return rc;
+		at += n;
+	}
+	return 0;
+}
+
+int session_stop_cw(struct session *s)
+{
+	struct ctl_cmd c;
+
+	memset(&c, 0, sizeof(c));
+	c.op = SESSION_CTL_CW;
+	c.a = 1;
+	return ctl_push(s, &c);
 }
